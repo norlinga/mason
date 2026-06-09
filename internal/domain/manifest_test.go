@@ -27,12 +27,12 @@ func TestParseAndMarshalManifestRoundTrip(t *testing.T) {
 				ID:        "01J9Z",
 				Blob:      manifestBlobA,
 				Path:      &Endpoint{Value: "super/rad/podcasts/episode-01.mp3", State: EndpointOK},
-				Slug:      &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
+				Slug:      &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointOK},
 				CreatedAt: createdAt,
 				UpdatedAt: updatedAt,
 			},
 		},
-		ReservedSlugs: []string{"f76"},
+		ReservedSlugs: []string{"f76Ab1"},
 	}
 
 	data, err := MarshalManifest(original)
@@ -57,11 +57,11 @@ func TestParseAndMarshalManifestRoundTrip(t *testing.T) {
 	if share.Path == nil || share.Path.Value != "super/rad/podcasts/episode-01.mp3" {
 		t.Fatalf("Path = %#v, want episode path", share.Path)
 	}
-	if share.Slug == nil || share.Slug.Value != "f76" || share.Slug.Ext != ".mp3" {
-		t.Fatalf("Slug = %#v, want f76 slug", share.Slug)
+	if share.Slug == nil || share.Slug.Value != "f76Ab1" || share.Slug.Ext != ".mp3" {
+		t.Fatalf("Slug = %#v, want f76Ab1 slug", share.Slug)
 	}
-	if len(got.ReservedSlugs) != 1 || got.ReservedSlugs[0] != "f76" {
-		t.Fatalf("ReservedSlugs = %#v, want [f76]", got.ReservedSlugs)
+	if len(got.ReservedSlugs) != 1 || got.ReservedSlugs[0] != "f76Ab1" {
+		t.Fatalf("ReservedSlugs = %#v, want [f76Ab1]", got.ReservedSlugs)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestEndpointRefCount(t *testing.T) {
 			name: "both endpoints",
 			share: Share{
 				Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK},
-				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
+				Slug: &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointOK},
 			},
 			want: 2,
 		},
@@ -97,7 +97,7 @@ func TestEndpointRefCount(t *testing.T) {
 			name: "disabled endpoints still count",
 			share: Share{
 				Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointDisabled},
-				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointDisabled},
+				Slug: &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointDisabled},
 			},
 			want: 2,
 		},
@@ -111,7 +111,7 @@ func TestEndpointRefCount(t *testing.T) {
 		{
 			name: "slug only",
 			share: Share{
-				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
+				Slug: &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointOK},
 			},
 			want: 1,
 		},
@@ -146,7 +146,7 @@ func TestBlobRefCountAggregatesAcrossShares(t *testing.T) {
 				ID:   "share-1",
 				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "a/foo.mp3", State: EndpointOK},
-				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointDisabled},
+				Slug: &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointDisabled},
 			},
 			{
 				ID:   "share-2",
@@ -156,10 +156,10 @@ func TestBlobRefCountAggregatesAcrossShares(t *testing.T) {
 			{
 				ID:   "share-3",
 				Blob: manifestBlobB,
-				Slug: &SlugEndpoint{Value: "g42", Ext: ".mp3", State: EndpointOK},
+				Slug: &SlugEndpoint{Value: "g42Cd2", Ext: ".mp3", State: EndpointOK},
 			},
 		},
-		ReservedSlugs: []string{"f76", "g42"},
+		ReservedSlugs: []string{"f76Ab1", "g42Cd2"},
 	}
 
 	if got, want := manifest.BlobRefCount(manifestBlobA), 3; got != want {
@@ -217,25 +217,25 @@ func TestBuildIndexesAndLookup(t *testing.T) {
 				ID:   "share-1",
 				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK},
-				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
+				Slug: &SlugEndpoint{Value: "f76Ab1", Ext: ".mp3", State: EndpointOK},
 			},
 		},
-		ReservedSlugs: []string{"f76"},
+		ReservedSlugs: []string{"f76Ab1"},
 	}
 
 	indexes := BuildIndexes(manifest)
 	if indexes.ByPath["inbox/foo.mp3"].ID != "share-1" {
 		t.Fatalf("ByPath lookup = %#v, want share-1", indexes.ByPath["inbox/foo.mp3"])
 	}
-	if indexes.BySlug["f76"].ID != "share-1" {
-		t.Fatalf("BySlug lookup = %#v, want share-1", indexes.BySlug["f76"])
+	if indexes.BySlug["f76Ab1"].ID != "share-1" {
+		t.Fatalf("BySlug lookup = %#v, want share-1", indexes.BySlug["f76Ab1"])
 	}
 
 	byPath, ok := manifest.FindShareByPath("inbox/foo.mp3")
 	if !ok || byPath.ID != "share-1" {
 		t.Fatalf("FindShareByPath = %#v, %v", byPath, ok)
 	}
-	bySlug, ok := manifest.FindShareBySlug("f76")
+	bySlug, ok := manifest.FindShareBySlug("f76Ab1")
 	if !ok || bySlug.ID != "share-1" {
 		t.Fatalf("FindShareBySlug = %#v, %v", bySlug, ok)
 	}
@@ -328,10 +328,10 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 				Version: ManifestVersion,
 				Blobs:   map[string]Blob{manifestBlobA: {}, manifestBlobB: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
-					{ID: "share-2", Blob: manifestBlobB, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76Ab1", State: EndpointOK}},
+					{ID: "share-2", Blob: manifestBlobB, Slug: &SlugEndpoint{Value: "f76Ab1", State: EndpointOK}},
 				},
-				ReservedSlugs: []string{"f76"},
+				ReservedSlugs: []string{"f76Ab1"},
 			},
 			want: "duplicate slug",
 		},
@@ -341,7 +341,7 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 				Version: ManifestVersion,
 				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76Ab1", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -358,6 +358,62 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 				ReservedSlugs: []string{},
 			},
 			want: "invalid path state",
+		},
+		{
+			name: "non-canonical path endpoint",
+			m: &Manifest{
+				Version: ManifestVersion,
+				Blobs:   map[string]Blob{manifestBlobA: {}},
+				Shares: []Share{
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "inbox//foo.mp3", State: EndpointOK}},
+				},
+				ReservedSlugs: []string{},
+			},
+			want: "must be canonical",
+		},
+		{
+			name: "reserved namespace path endpoint",
+			m: &Manifest{
+				Version: ManifestVersion,
+				Blobs:   map[string]Blob{manifestBlobA: {}},
+				Shares: []Share{
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "s/foo.mp3", State: EndpointOK}},
+				},
+				ReservedSlugs: []string{},
+			},
+			want: "reserved prefix",
+		},
+		{
+			name: "invalid reserved slug",
+			m: &Manifest{
+				Version:       ManifestVersion,
+				Blobs:         map[string]Blob{},
+				Shares:        []Share{},
+				ReservedSlugs: []string{"bad/slug"},
+			},
+			want: "invalid reserved slug",
+		},
+		{
+			name: "duplicate reserved slug",
+			m: &Manifest{
+				Version:       ManifestVersion,
+				Blobs:         map[string]Blob{},
+				Shares:        []Share{},
+				ReservedSlugs: []string{"aaa111", "aaa111"},
+			},
+			want: "duplicate reserved slug",
+		},
+		{
+			name: "invalid slug endpoint",
+			m: &Manifest{
+				Version: ManifestVersion,
+				Blobs:   map[string]Blob{manifestBlobA: {}},
+				Shares: []Share{
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "bad/slug", State: EndpointOK}},
+				},
+				ReservedSlugs: []string{"aaa111"},
+			},
+			want: "invalid slug endpoint",
 		},
 	}
 
@@ -517,9 +573,9 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 				Version: ManifestVersion,
 				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: "broken"}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76Ab1", State: "broken"}},
 				},
-				ReservedSlugs: []string{"f76"},
+				ReservedSlugs: []string{"f76Ab1"},
 			},
 			want: "invalid slug state",
 		},
@@ -553,7 +609,7 @@ func TestNilManifestBlobRefCountsAndIndexes(t *testing.T) {
 	if len(indexes.ByPath) != 0 || len(indexes.BySlug) != 0 {
 		t.Fatalf("BuildIndexes(nil) = %#v, want empty indexes", indexes)
 	}
-	if share, ok := (*Manifest)(nil).FindShareBySlug("f76"); ok || share != nil {
+	if share, ok := (*Manifest)(nil).FindShareBySlug("f76Ab1"); ok || share != nil {
 		t.Fatalf("FindShareBySlug on nil = %#v, %v, want nil false", share, ok)
 	}
 }

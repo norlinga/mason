@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // slugAlphabet is base62: digits, then lowercase, then uppercase.
@@ -14,6 +15,19 @@ const SlugLength = 6
 
 // maxSlugMintAttempts bounds collision retries before giving up.
 const maxSlugMintAttempts = 100
+
+// ValidateSlug checks that slug is a clean SlugLength base62 identity.
+func ValidateSlug(slug string) error {
+	if len(slug) != SlugLength {
+		return fmt.Errorf("slug %q must be %d characters", slug, SlugLength)
+	}
+	for _, c := range slug {
+		if !strings.ContainsRune(slugAlphabet, c) {
+			return fmt.Errorf("slug %q contains non-base62 character %q", slug, c)
+		}
+	}
+	return nil
+}
 
 // MintSlug returns a fresh SlugLength base62 slug for which reserved is false,
 // drawing randomness from crypto/rand. reserved reports whether a candidate is

@@ -117,6 +117,9 @@ func (m *Manifest) Validate() error {
 	if err := validateBlobKeys(m.Blobs); err != nil {
 		return err
 	}
+	if err := validateReservedSlugs(m.ReservedSlugs); err != nil {
+		return err
+	}
 	reservedSlugs := reservedSlugSet(m.ReservedSlugs)
 
 	seenIDs := make(map[string]struct{}, len(m.Shares))
@@ -166,12 +169,33 @@ func reservedSlugSet(slugs []string) map[string]struct{} {
 	return reserved
 }
 
+func validateReservedSlugs(slugs []string) error {
+	seen := make(map[string]struct{}, len(slugs))
+	for _, slug := range slugs {
+		if err := ValidateSlug(slug); err != nil {
+			return fmt.Errorf("invalid reserved slug: %w", err)
+		}
+		if _, ok := seen[slug]; ok {
+			return fmt.Errorf("duplicate reserved slug %q", slug)
+		}
+		seen[slug] = struct{}{}
+	}
+	return nil
+}
+
 func validatePathEndpoint(share *Share, indexes Indexes) error {
 	if share.Path == nil {
 		return nil
 	}
 	if share.Path.Value == "" {
 		return fmt.Errorf("share %q path endpoint requires value", share.ID)
+	}
+	normalized, err := NormalizeObjectPath(share.Path.Value)
+	if err != nil {
+		return fmt.Errorf("share %q has invalid path endpoint: %w", share.ID, err)
+	}
+	if normalized != share.Path.Value {
+		return fmt.Errorf("share %q path endpoint must be canonical: %q", share.ID, share.Path.Value)
 	}
 	if !share.Path.State.Valid() {
 		return fmt.Errorf("share %q has invalid path state %q", share.ID, share.Path.State)
@@ -188,6 +212,9 @@ func validateSlugEndpoint(share *Share, indexes Indexes, reservedSlugs map[strin
 	}
 	if share.Slug.Value == "" {
 		return fmt.Errorf("share %q slug endpoint requires value", share.ID)
+	}
+	if err := ValidateSlug(share.Slug.Value); err != nil {
+		return fmt.Errorf("share %q has invalid slug endpoint: %w", share.ID, err)
 	}
 	if _, ok := reservedSlugs[share.Slug.Value]; !ok {
 		return fmt.Errorf("share %q slug %q is not reserved", share.ID, share.Slug.Value)

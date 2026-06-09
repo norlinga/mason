@@ -17,6 +17,37 @@ func (r infiniteReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func TestValidateSlug(t *testing.T) {
+	tests := []struct {
+		name    string
+		slug    string
+		wantErr string
+	}{
+		{name: "valid", slug: "f76Ab1"},
+		{name: "too short", slug: "f76", wantErr: "must be 6 characters"},
+		{name: "too long", slug: "f76Ab12", wantErr: "must be 6 characters"},
+		{name: "non base62", slug: "f76-a1", wantErr: "non-base62"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSlug(tt.slug)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ValidateSlug(%q) err = nil, want containing %q", tt.slug, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ValidateSlug(%q) err = %q, want containing %q", tt.slug, err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateSlug(%q): %v", tt.slug, err)
+			}
+		})
+	}
+}
+
 func TestMintSlugWith(t *testing.T) {
 	t.Run("maps bytes onto base62 alphabet", func(t *testing.T) {
 		got, err := MintSlugWith(bytes.NewReader([]byte{0, 1, 2, 3, 4, 5}), nil)
