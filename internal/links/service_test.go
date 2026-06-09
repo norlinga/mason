@@ -92,7 +92,29 @@ func (s *fakeStore) Put(_ context.Context, m *domain.Manifest) error {
 	s.puts++
 	return nil
 }
-func (s *fakeStore) Update(context.Context, func(*domain.Manifest) error) error { return nil }
+func (s *fakeStore) Update(_ context.Context, mutate func(*domain.Manifest) error) error {
+	prev, err := cloneManifest(s.manifest)
+	if err != nil {
+		return err
+	}
+	if err := mutate(s.manifest); err != nil {
+		return err
+	}
+	if s.putErr != nil {
+		s.manifest = prev
+		return s.putErr
+	}
+	s.puts++
+	return nil
+}
+
+func cloneManifest(m *domain.Manifest) (*domain.Manifest, error) {
+	data, err := domain.MarshalManifest(m)
+	if err != nil {
+		return nil, err
+	}
+	return domain.ParseManifest(data)
+}
 
 func newService(t *testing.T, fs *fakeFS, store *fakeStore) *Service {
 	t.Helper()

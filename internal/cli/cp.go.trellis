@@ -1,0 +1,32 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Copy Share Command
+  "CLI handler for mason cp: duplicate a share at a new path with a fresh slug."
+
+  Provides:
+    - cli.newCpCommand @source("symbol:newCpCommand")
+    - cli.defaultCpRun @source("symbol:defaultCpRun")
+
+  Consumes:
+    - links.Service.Copy
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+
+  Invariants:
+    - Human output MUST report the new object path and both URLs
+    - Quiet mode MUST print only the short URL
+    - JSON output MUST use the stable cpJSON shape under output.Success
+
+  Scenario (happy-path): Copy with human output
+    Given a successful copy result
+    When renderCp runs without --json
+    Then stdout shows the new path and URLs
+
+  Scenario (negative): Copy failure
+    Given Copy returns an error
+    When the command runs
+    Then emitError renders the failure

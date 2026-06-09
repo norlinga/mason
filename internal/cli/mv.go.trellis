@@ -1,0 +1,32 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Move Share Command
+  "CLI handler for mason mv: re-home a share's object-path endpoint."
+
+  Provides:
+    - cli.newMvCommand @source("symbol:newMvCommand")
+    - cli.defaultMvRun @source("symbol:defaultMvRun")
+
+  Consumes:
+    - links.Service.Move
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+
+  Invariants:
+    - Human output MUST report old and new object paths when applicable
+    - Quiet mode MUST print only the long URL at the new path
+    - JSON output MUST use the stable mvJSON shape under output.Success
+
+  Scenario (happy-path): Move with human output
+    Given a successful move result
+    When renderMv runs without --json
+    Then stdout shows the moved paths and long URL
+
+  Scenario (negative): Move failure
+    Given Move returns an error
+    When the command runs
+    Then emitError renders the failure

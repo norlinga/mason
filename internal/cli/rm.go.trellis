@@ -1,0 +1,32 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Remove Endpoint Command
+  "CLI handler for mason rm: remove one share endpoint (path or slug)."
+
+  Provides:
+    - cli.newRmCommand @source("symbol:newRmCommand")
+    - cli.defaultRmRun @source("symbol:defaultRmRun")
+
+  Consumes:
+    - links.Service.Remove
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+
+  Invariants:
+    - Human output MUST report share removal and blob orphan hints when applicable
+    - Quiet mode MUST emit no stdout on success
+    - JSON output MUST use the stable rmJSON shape under output.Success
+
+  Scenario (happy-path): Remove endpoint
+    Given a successful remove result
+    When renderRm runs without --json
+    Then stdout reports the removed ref
+
+  Scenario (negative): Remove failure
+    Given Remove returns an error
+    When the command runs
+    Then emitError renders the failure

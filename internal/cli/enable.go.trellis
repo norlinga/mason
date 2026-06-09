@@ -1,0 +1,33 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Enable Endpoint Command
+  "CLI handler for mason enable: re-activate a disabled share endpoint."
+
+  Provides:
+    - cli.newEnableCommand @source("symbol:newEnableCommand")
+    - cli.defaultEnableRun @source("symbol:defaultEnableRun")
+
+  Consumes:
+    - links.Service.Enable
+    - cli.renderEndpoint
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+
+  Invariants:
+    - Human output MUST distinguish changed vs already-enabled no-ops
+    - Quiet mode MUST emit no stdout on success
+    - JSON output MUST use the stable endpointJSON shape under output.Success
+
+  Scenario (happy-path): Enable endpoint
+    Given Enable changes state
+    When the command completes
+    Then stdout reports Enabled <ref>
+
+  Scenario (negative): Enable failure
+    Given Enable returns an error
+    When the command runs
+    Then emitError renders the failure

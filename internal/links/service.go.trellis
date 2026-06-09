@@ -4,7 +4,7 @@
 @reviewed: 2026-06-09
 
 Feature: Share Link Mutations
-  "Creates and re-points share symlinks and patches the authoritative manifest without moving blob bytes."
+  "Creates and updates share symlinks and patches the authoritative manifest without moving blob bytes."
 
   Provides:
     - links.Service @source("symbol:Service")
@@ -12,32 +12,70 @@ Feature: Share Link Mutations
     - links.ShareRequest @source("symbol:ShareRequest")
     - links.ShareResult @source("symbol:ShareResult")
     - links.Service.EnsureShare @source("symbol:EnsureShare")
+    - links.MoveRequest @source("symbol:MoveRequest")
+    - links.MoveResult @source("symbol:MoveResult")
+    - links.Service.Move @source("symbol:Move")
+    - links.CopyRequest @source("symbol:CopyRequest")
+    - links.CopyResult @source("symbol:CopyResult")
+    - links.Service.Copy @source("symbol:Copy")
+    - links.RemoveRequest @source("symbol:RemoveRequest")
+    - links.RemoveResult @source("symbol:RemoveResult")
+    - links.Service.Remove @source("symbol:Remove")
+    - links.EndpointRequest @source("symbol:EndpointRequest")
+    - links.EndpointResult @source("symbol:EndpointResult")
+    - links.Service.Disable @source("symbol:Disable")
+    - links.Service.Enable @source("symbol:Enable")
+    - links.PruneRequest @source("symbol:PruneRequest")
+    - links.PruneResult @source("symbol:PruneResult")
+    - links.Service.Prune @source("symbol:Prune")
 
   Consumes:
     - remote.ManifestStore
     - remote.EnsureSafeSymlink
     - domain.Manifest.DecideShare
+    - domain.Manifest.OrphanedBlobs
     - domain.MintSlug
 
   Invariants:
     - EnsureShare MUST require the blob to already exist in the manifest (two-phase share)
     - New shares MUST mint a slug, reserve it, and create object-path plus canonical and bare slug symlinks
     - Repoint MUST update symlinks only for endpoints still in EndpointOK state
+    - Move MUST re-home only the object-path endpoint and leave the slug endpoint unchanged
+    - Copy MUST create a new share with a fresh slug over the same blob without moving bytes
+    - Remove MUST act on the referenced endpoint only; reserved slugs MUST NOT be unreserved
+    - Disable and Enable MUST toggle one endpoint symmetrically; disabled endpoints MUST still count toward blob references
+    - Prune MUST report orphans without Confirm and MUST update the manifest before deleting blob files when confirmed
     - Symlink targets MUST stay relative to each link parent directory under the site root
+    - Remote symlink changes MUST complete or roll back before manifest writes fail visibly to the caller
 
   OutOfScope:
     - Blob byte upload (owned by the share package)
-    - mv, cp, rm, disable, enable, prune commands (future links mutations)
+    - CLI rendering and target resolution (owned by internal/cli)
 
   Scenario (happy-path): Create new share
     Given a manifest with the blob recorded but no share at the object path
     When EnsureShare runs
     Then Action is ShareCreate, symlinks are written, and manifest is committed
 
-  Scenario (happy-path): No-op same blob
-    Given an object path already pointing at the same blob
-    When EnsureShare runs
-    Then Action is ShareNoop and no manifest write occurs
+  Scenario (happy-path): Move object path
+    Given a share with an active object-path endpoint
+    When Move runs to an unused destination
+    Then the slug endpoint is unchanged and the object-path symlink is re-homed
+
+  Scenario (happy-path): Copy share
+    Given a share referenced by either endpoint
+    When Copy runs to an unused destination
+    Then a new share with a new slug points at the same blob and the source share is untouched
+
+  Scenario (happy-path): Disable endpoint
+    Given an enabled endpoint
+    When Disable runs
+    Then symlinks are removed before the manifest is marked disabled
+
+  Scenario (happy-path): Prune confirmed
+    Given orphaned blobs in the manifest
+    When Prune runs with Confirm
+    Then manifest entries are removed before blob files are deleted
 
   Scenario (negative): Blob not uploaded
     Given a blob key absent from manifest.Blobs

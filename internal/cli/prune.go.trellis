@@ -1,0 +1,38 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Prune Orphans Command
+  "CLI handler for mason prune: garbage-collect unreferenced blobs."
+
+  Provides:
+    - cli.newPruneCommand @source("symbol:newPruneCommand")
+    - cli.defaultPruneRun @source("symbol:defaultPruneRun")
+
+  Consumes:
+    - links.Service.Prune
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+    - output.HumanSize
+
+  Invariants:
+    - defaultPruneRun MUST dry-run unless --yes is set and --dry-run is not
+    - Human output MUST distinguish Would prune vs Pruned and prompt for --yes when dry-run
+    - JSON output MUST use the stable pruneJSON shape under output.Success
+
+  Scenario (happy-path): Dry-run prune
+    Given orphaned blobs exist
+    When mason prune runs without --yes
+    Then stdout reports would-prune and does not delete
+
+  Scenario (happy-path): Confirmed prune
+    Given --yes without --dry-run
+    When prune succeeds
+    Then stdout reports Pruned and deleted is true in JSON
+
+  Scenario (negative): Prune failure
+    Given Prune returns an error
+    When the command runs
+    Then emitError renders the failure
