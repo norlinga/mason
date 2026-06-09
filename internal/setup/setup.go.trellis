@@ -1,0 +1,69 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Local Onboarding Wizard
+  "Collects target details, ensures an SSH key exists, writes a validated .mason config, and tests connectivity — all from the local machine."
+
+  Provides:
+    - setup.Run @source("symbol:Run")
+    - setup.Input @source("symbol:Input")
+    - setup.Params @source("symbol:Params")
+    - setup.Result @source("symbol:Result")
+    - setup.Deps @source("symbol:Deps")
+    - setup.Prompter @source("symbol:Prompter")
+    - setup.Keygen @source("symbol:Keygen")
+    - setup.BuildConfig @source("symbol:BuildConfig")
+    - setup.MarshalConfig @source("symbol:MarshalConfig")
+    - setup.Warnings @source("symbol:Warnings")
+    - setup.ResolveKeyPath @source("symbol:ResolveKeyPath")
+    - setup.WriteConfigFile @source("symbol:WriteConfigFile")
+    - setup.TestConnection @source("symbol:TestConnection")
+    - setup.NewSystemKeygen @source("symbol:NewSystemKeygen")
+    - setup.NewStdinPrompter @source("symbol:NewStdinPrompter")
+
+  Consumes:
+    - config.Target
+    - config.Config.Validate
+    - remote.CommandRunner
+
+  Invariants:
+    - Run MUST stay local-only: it never creates remote directories or mutates the server (that is remote-init)
+    - The written config MUST pass config.Config.Validate and record the resolved key_path actually used
+    - Run MUST resolve the SSH key path before building config so defaults are persisted, not implied
+    - A missing key without GenerateKey MUST surface a warning and skip the connectivity test, not fail the run
+    - WriteConfigFile MUST refuse to overwrite an existing file unless Force is set
+    - A failed connectivity test MUST be non-fatal and reported via Result, after config is written
+    - Prompts MUST only fill fields not already supplied; flag-supplied values are never re-asked
+
+  OutOfScope:
+    - Remote server bootstrap: layout, permissions, Caddy snippet (remote-init, M-071)
+    - Diagnostics of an existing installation (doctor, M-072)
+    - Multi-target config editing (target subcommands, M-073)
+    - Project deploy scaffolding (owned by init.go)
+
+  Scenario (happy-path): First-run onboarding
+    Given no existing config and no SSH key
+    When Run executes with GenerateKey and Test
+    Then a key is generated, a validated config recording that key path is written, and the connectivity test result is reported
+
+  Scenario (happy-path): Interactive defaults
+    Given a prompter and a host answer with other fields blank
+    When fillInput collects input
+    Then the base URL defaults to https://<host> and standard target defaults apply
+
+  Scenario (edge): Missing key without generation
+    Given no SSH key and GenerateKey disabled
+    When Run executes with Test requested
+    Then config is still written, the test is skipped, and a missing-key warning is emitted
+
+  Scenario (negative): Existing config without Force
+    Given a .mason file already at the destination
+    When Run executes without Force
+    Then it returns an error and the file is untouched
+
+  Scenario (negative): Unreachable host
+    Given a valid key but an unreachable host
+    When Run executes with Test
+    Then Run succeeds, TestOK is false, and TestErr carries the connection error

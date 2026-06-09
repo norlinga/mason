@@ -67,6 +67,7 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newDeployCommand(stdout, stderr, defaultDeployRun))
 	cmd.AddCommand(newStatusCommand(stdout, stderr, defaultDeployRun))
 	cmd.AddCommand(newInitCommand(stdout, stderr, defaultInitRun))
+	cmd.AddCommand(newSetupCommand(stdout, stderr, defaultSetupRun))
 
 	return cmd
 }

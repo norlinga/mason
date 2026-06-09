@@ -1,0 +1,46 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Setup Command
+  "CLI handler for mason setup: onboard a target with key check, config write, and SSH test."
+
+  Provides:
+    - cli.newSetupCommand @source("symbol:newSetupCommand")
+    - cli.defaultSetupRun @source("symbol:defaultSetupRun")
+
+  Consumes:
+    - setup.Run
+    - setup.NewSystemKeygen
+    - setup.NewStdinPrompter
+    - remote.SSHOptionsFromTarget
+    - remote.NewSSH
+    - output.WriteJSON
+
+  Invariants:
+    - Key generation MUST default on; --no-generate-key is the explicit opt-out
+    - --yes MUST disable interactive prompting so flags plus defaults drive the run
+    - --config MUST override the config write destination (default ~/.mason)
+    - Human output MUST report config path, key status, connectivity outcome, and warnings
+    - Quiet mode MUST emit no stdout on success
+    - JSON output MUST use the stable setupJSON shape under output.Success
+
+  OutOfScope:
+    - Onboarding logic: prompting order, key resolution, config assembly (owned by internal/setup)
+    - Remote bootstrap and diagnostics commands (remote-init, doctor)
+
+  Scenario (happy-path): Non-interactive setup
+    Given -y with host, root, and base-url flags
+    When the command completes
+    Then stdout reports the config path, key status, and connection test result
+
+  Scenario (happy-path): Setup JSON
+    Given --json and a successful run
+    When the command completes
+    Then stdout is a success envelope with config_path, key state, test state, and warnings
+
+  Scenario (negative): Setup failure
+    Given setup.Run returns an error
+    When the command runs
+    Then emitError renders the failure and the exit code is non-zero

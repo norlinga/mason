@@ -18,8 +18,8 @@ Feature: Project Init Scaffold
     - ProjectConfigTemplate MUST parse through config.Parse without error
 
   OutOfScope:
-    - Interactive setup wizard (future M-070)
-    - Remote server bootstrap (future M-071)
+    - Interactive onboarding wizard (owned by setup.go / setup.Run)
+    - Remote server bootstrap (remote-init, M-071)
 
   Scenario (happy-path): Scaffold new project
     Given a directory without .mason
