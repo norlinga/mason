@@ -114,11 +114,10 @@ func (m *Manifest) Validate() error {
 	if m.ReservedSlugs == nil {
 		return fmt.Errorf("manifest reserved_slugs list is required")
 	}
-	for blob := range m.Blobs {
-		if _, err := BlobHex(blob); err != nil {
-			return fmt.Errorf("invalid blob key %q: %w", blob, err)
-		}
+	if err := validateBlobKeys(m.Blobs); err != nil {
+		return err
 	}
+	reservedSlugs := reservedSlugSet(m.ReservedSlugs)
 
 	seenIDs := make(map[string]struct{}, len(m.Shares))
 	indexes := BuildIndexes(m)
@@ -140,28 +139,64 @@ func (m *Manifest) Validate() error {
 		if share.Path == nil && share.Slug == nil {
 			return fmt.Errorf("share %q must retain at least one endpoint", share.ID)
 		}
-		if share.Path != nil {
-			if share.Path.Value == "" {
-				return fmt.Errorf("share %q path endpoint requires value", share.ID)
-			}
-			if !share.Path.State.Valid() {
-				return fmt.Errorf("share %q has invalid path state %q", share.ID, share.Path.State)
-			}
-			if other, ok := indexes.ByPath[share.Path.Value]; ok && other.ID != share.ID {
-				return fmt.Errorf("duplicate object path %q", share.Path.Value)
-			}
+		if err := validatePathEndpoint(share, indexes); err != nil {
+			return err
 		}
-		if share.Slug != nil {
-			if share.Slug.Value == "" {
-				return fmt.Errorf("share %q slug endpoint requires value", share.ID)
-			}
-			if !share.Slug.State.Valid() {
-				return fmt.Errorf("share %q has invalid slug state %q", share.ID, share.Slug.State)
-			}
-			if other, ok := indexes.BySlug[share.Slug.Value]; ok && other.ID != share.ID {
-				return fmt.Errorf("duplicate slug %q", share.Slug.Value)
-			}
+		if err := validateSlugEndpoint(share, indexes, reservedSlugs); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func validateBlobKeys(blobs map[string]Blob) error {
+	for blob := range blobs {
+		if _, err := BlobHex(blob); err != nil {
+			return fmt.Errorf("invalid blob key %q: %w", blob, err)
+		}
+	}
+	return nil
+}
+
+func reservedSlugSet(slugs []string) map[string]struct{} {
+	reserved := make(map[string]struct{}, len(slugs))
+	for _, slug := range slugs {
+		reserved[slug] = struct{}{}
+	}
+	return reserved
+}
+
+func validatePathEndpoint(share *Share, indexes Indexes) error {
+	if share.Path == nil {
+		return nil
+	}
+	if share.Path.Value == "" {
+		return fmt.Errorf("share %q path endpoint requires value", share.ID)
+	}
+	if !share.Path.State.Valid() {
+		return fmt.Errorf("share %q has invalid path state %q", share.ID, share.Path.State)
+	}
+	if other, ok := indexes.ByPath[share.Path.Value]; ok && other.ID != share.ID {
+		return fmt.Errorf("duplicate object path %q", share.Path.Value)
+	}
+	return nil
+}
+
+func validateSlugEndpoint(share *Share, indexes Indexes, reservedSlugs map[string]struct{}) error {
+	if share.Slug == nil {
+		return nil
+	}
+	if share.Slug.Value == "" {
+		return fmt.Errorf("share %q slug endpoint requires value", share.ID)
+	}
+	if _, ok := reservedSlugs[share.Slug.Value]; !ok {
+		return fmt.Errorf("share %q slug %q is not reserved", share.ID, share.Slug.Value)
+	}
+	if !share.Slug.State.Valid() {
+		return fmt.Errorf("share %q has invalid slug state %q", share.ID, share.Slug.State)
+	}
+	if other, ok := indexes.BySlug[share.Slug.Value]; ok && other.ID != share.ID {
+		return fmt.Errorf("duplicate slug %q", share.Slug.Value)
 	}
 	return nil
 }

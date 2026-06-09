@@ -331,9 +331,21 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
 					{ID: "share-2", Blob: manifestBlobB, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
 				},
-				ReservedSlugs: []string{},
+				ReservedSlugs: []string{"f76"},
 			},
 			want: "duplicate slug",
+		},
+		{
+			name: "slug endpoint is not reserved",
+			m: &Manifest{
+				Version: ManifestVersion,
+				Blobs:   map[string]Blob{manifestBlobA: {}},
+				Shares: []Share{
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
+				},
+				ReservedSlugs: []string{},
+			},
+			want: "is not reserved",
 		},
 		{
 			name: "invalid endpoint state",
@@ -507,7 +519,7 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 				Shares: []Share{
 					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: "broken"}},
 				},
-				ReservedSlugs: []string{},
+				ReservedSlugs: []string{"f76"},
 			},
 			want: "invalid slug state",
 		},
