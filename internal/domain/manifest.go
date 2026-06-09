@@ -114,6 +114,11 @@ func (m *Manifest) Validate() error {
 	if m.ReservedSlugs == nil {
 		return fmt.Errorf("manifest reserved_slugs list is required")
 	}
+	for blob := range m.Blobs {
+		if _, err := BlobHex(blob); err != nil {
+			return fmt.Errorf("invalid blob key %q: %w", blob, err)
+		}
+	}
 
 	seenIDs := make(map[string]struct{}, len(m.Shares))
 	indexes := BuildIndexes(m)

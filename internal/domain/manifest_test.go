@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+const (
+	manifestBlobA = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	manifestBlobB = "sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"
+	manifestBlobC = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
+
 func TestParseAndMarshalManifestRoundTrip(t *testing.T) {
 	uploadedAt := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	createdAt := uploadedAt
@@ -14,12 +20,12 @@ func TestParseAndMarshalManifestRoundTrip(t *testing.T) {
 	original := &Manifest{
 		Version: ManifestVersion,
 		Blobs: map[string]Blob{
-			"sha256:abc": {Size: 4412345, UploadedAt: uploadedAt},
+			manifestBlobA: {Size: 4412345, UploadedAt: uploadedAt},
 		},
 		Shares: []Share{
 			{
 				ID:        "01J9Z",
-				Blob:      "sha256:abc",
+				Blob:      manifestBlobA,
 				Path:      &Endpoint{Value: "super/rad/podcasts/episode-01.mp3", State: EndpointOK},
 				Slug:      &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
 				CreatedAt: createdAt,
@@ -41,8 +47,8 @@ func TestParseAndMarshalManifestRoundTrip(t *testing.T) {
 	if got.Version != original.Version {
 		t.Fatalf("Version = %d, want %d", got.Version, original.Version)
 	}
-	if len(got.Blobs) != 1 || got.Blobs["sha256:abc"].Size != 4412345 {
-		t.Fatalf("Blobs = %#v, want one abc blob", got.Blobs)
+	if len(got.Blobs) != 1 || got.Blobs[manifestBlobA].Size != 4412345 {
+		t.Fatalf("Blobs = %#v, want one test blob", got.Blobs)
 	}
 	if len(got.Shares) != 1 {
 		t.Fatalf("Shares length = %d, want 1", len(got.Shares))
@@ -132,42 +138,42 @@ func TestBlobRefCountAggregatesAcrossShares(t *testing.T) {
 	manifest := &Manifest{
 		Version: ManifestVersion,
 		Blobs: map[string]Blob{
-			"sha256:abc": {Size: 10},
-			"sha256:def": {Size: 20},
+			manifestBlobA: {Size: 10},
+			manifestBlobB: {Size: 20},
 		},
 		Shares: []Share{
 			{
 				ID:   "share-1",
-				Blob: "sha256:abc",
+				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "a/foo.mp3", State: EndpointOK},
 				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointDisabled},
 			},
 			{
 				ID:   "share-2",
-				Blob: "sha256:abc",
+				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "b/foo.mp3", State: EndpointOK},
 			},
 			{
 				ID:   "share-3",
-				Blob: "sha256:def",
+				Blob: manifestBlobB,
 				Slug: &SlugEndpoint{Value: "g42", Ext: ".mp3", State: EndpointOK},
 			},
 		},
 		ReservedSlugs: []string{"f76", "g42"},
 	}
 
-	if got, want := manifest.BlobRefCount("sha256:abc"), 3; got != want {
+	if got, want := manifest.BlobRefCount(manifestBlobA), 3; got != want {
 		t.Fatalf("BlobRefCount(abc) = %d, want %d", got, want)
 	}
-	if got, want := manifest.BlobRefCount("sha256:def"), 1; got != want {
+	if got, want := manifest.BlobRefCount(manifestBlobB), 1; got != want {
 		t.Fatalf("BlobRefCount(def) = %d, want %d", got, want)
 	}
-	if got, want := manifest.BlobRefCount("sha256:missing"), 0; got != want {
+	if got, want := manifest.BlobRefCount(manifestBlobC), 0; got != want {
 		t.Fatalf("BlobRefCount(missing) = %d, want %d", got, want)
 	}
 
 	counts := manifest.BlobRefCounts()
-	if counts["sha256:abc"] != 3 || counts["sha256:def"] != 1 {
+	if counts[manifestBlobA] != 3 || counts[manifestBlobB] != 1 {
 		t.Fatalf("BlobRefCounts() = %#v, want abc=3 def=1", counts)
 	}
 }
@@ -176,14 +182,14 @@ func TestOrphanedBlobs(t *testing.T) {
 	manifest := &Manifest{
 		Version: ManifestVersion,
 		Blobs: map[string]Blob{
-			"sha256:abc": {Size: 10},
-			"sha256:def": {Size: 20},
-			"sha256:ghi": {Size: 30},
+			manifestBlobA: {Size: 10},
+			manifestBlobB: {Size: 20},
+			manifestBlobC: {Size: 30},
 		},
 		Shares: []Share{
 			{
 				ID:   "share-1",
-				Blob: "sha256:abc",
+				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "a/foo.mp3", State: EndpointOK},
 			},
 		},
@@ -191,7 +197,7 @@ func TestOrphanedBlobs(t *testing.T) {
 	}
 
 	got := manifest.OrphanedBlobs()
-	want := []string{"sha256:def", "sha256:ghi"}
+	want := []string{manifestBlobB, manifestBlobC}
 	if len(got) != len(want) {
 		t.Fatalf("OrphanedBlobs() = %#v, want %#v", got, want)
 	}
@@ -209,7 +215,7 @@ func TestBuildIndexesAndLookup(t *testing.T) {
 		Shares: []Share{
 			{
 				ID:   "share-1",
-				Blob: "sha256:abc",
+				Blob: manifestBlobA,
 				Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK},
 				Slug: &SlugEndpoint{Value: "f76", Ext: ".mp3", State: EndpointOK},
 			},
@@ -238,7 +244,7 @@ func TestBuildIndexesAndLookup(t *testing.T) {
 func TestValidateRejectsInvalidManifests(t *testing.T) {
 	validShare := Share{
 		ID:   "share-1",
-		Blob: "sha256:abc",
+		Blob: manifestBlobA,
 		Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK},
 	}
 
@@ -272,11 +278,21 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 			want: "blobs map is required",
 		},
 		{
-			name: "share without endpoints",
+			name: "invalid blob key",
 			m: &Manifest{
 				Version:       ManifestVersion,
 				Blobs:         map[string]Blob{"sha256:abc": {}},
-				Shares:        []Share{{ID: "share-1", Blob: "sha256:abc"}},
+				Shares:        []Share{},
+				ReservedSlugs: []string{},
+			},
+			want: "invalid blob key",
+		},
+		{
+			name: "share without endpoints",
+			m: &Manifest{
+				Version:       ManifestVersion,
+				Blobs:         map[string]Blob{manifestBlobA: {}},
+				Shares:        []Share{{ID: "share-1", Blob: manifestBlobA}},
 				ReservedSlugs: []string{},
 			},
 			want: "must retain at least one endpoint",
@@ -287,7 +303,7 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 				Version: ManifestVersion,
 				Blobs:   map[string]Blob{},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -297,10 +313,10 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 			name: "duplicate object path",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}, "sha256:def": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}, manifestBlobB: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
-					{ID: "share-2", Blob: "sha256:def", Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
+					{ID: "share-2", Blob: manifestBlobB, Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -310,10 +326,10 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 			name: "duplicate slug",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}, "sha256:def": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}, manifestBlobB: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
-					{ID: "share-2", Blob: "sha256:def", Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
+					{ID: "share-2", Blob: manifestBlobB, Slug: &SlugEndpoint{Value: "f76", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -323,9 +339,9 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 			name: "invalid endpoint state",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Path: &Endpoint{Value: "inbox/foo.mp3", State: "broken"}},
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "inbox/foo.mp3", State: "broken"}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -347,7 +363,7 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 
 	valid := &Manifest{
 		Version:       ManifestVersion,
-		Blobs:         map[string]Blob{"sha256:abc": {}},
+		Blobs:         map[string]Blob{manifestBlobA: {}},
 		Shares:        []Share{validShare},
 		ReservedSlugs: []string{},
 	}
@@ -371,7 +387,7 @@ func TestMarshalManifestRejectsNil(t *testing.T) {
 }
 
 func TestNilManifestHelpersReturnZeroValues(t *testing.T) {
-	if got := (*Manifest)(nil).BlobRefCount("sha256:abc"); got != 0 {
+	if got := (*Manifest)(nil).BlobRefCount(manifestBlobA); got != 0 {
 		t.Fatalf("BlobRefCount on nil = %d, want 0", got)
 	}
 	if got := (*Manifest)(nil).OrphanedBlobs(); got != nil {
@@ -428,7 +444,7 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 				Version: ManifestVersion,
 				Blobs:   map[string]Blob{},
 				Shares: []Share{
-					{Blob: "sha256:abc", Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
+					{Blob: manifestBlobA, Path: &Endpoint{Value: "inbox/foo.mp3", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -438,10 +454,10 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 			name: "duplicate share id",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}, "sha256:def": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}, manifestBlobB: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Path: &Endpoint{Value: "a/foo.mp3", State: EndpointOK}},
-					{ID: "share-1", Blob: "sha256:def", Path: &Endpoint{Value: "b/foo.mp3", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{Value: "a/foo.mp3", State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobB, Path: &Endpoint{Value: "b/foo.mp3", State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -463,9 +479,9 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 			name: "missing path value",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Path: &Endpoint{State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Path: &Endpoint{State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -475,9 +491,9 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 			name: "missing slug value",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Slug: &SlugEndpoint{State: EndpointOK}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{State: EndpointOK}},
 				},
 				ReservedSlugs: []string{},
 			},
@@ -487,9 +503,9 @@ func TestValidateRejectsAdditionalShareProblems(t *testing.T) {
 			name: "invalid slug state",
 			m: &Manifest{
 				Version: ManifestVersion,
-				Blobs:   map[string]Blob{"sha256:abc": {}},
+				Blobs:   map[string]Blob{manifestBlobA: {}},
 				Shares: []Share{
-					{ID: "share-1", Blob: "sha256:abc", Slug: &SlugEndpoint{Value: "f76", State: "broken"}},
+					{ID: "share-1", Blob: manifestBlobA, Slug: &SlugEndpoint{Value: "f76", State: "broken"}},
 				},
 				ReservedSlugs: []string{},
 			},
