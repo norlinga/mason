@@ -32,6 +32,14 @@ type RsyncRequest struct {
 	OnProgress  func(RsyncProgress)
 }
 
+// CompareDryRunRequest describes a directory diff dry-run for deploy planning.
+type CompareDryRunRequest struct {
+	Source      string
+	Destination string
+	Delete      bool
+	SSH         *SSHOptions
+}
+
 // RsyncProgress is a parsed progress event from rsync output.
 type RsyncProgress struct {
 	Line    string
@@ -61,6 +69,20 @@ func NewRsyncWithRunner(binary string, runner ProcessRunner) *Rsync {
 		binary = defaultRsyncBinary
 	}
 	return &Rsync{binary: binary, runner: runner}
+}
+
+// CompareDryRun runs rsync dry-run with itemize-changes and stats for deploy planning.
+func (r *Rsync) CompareDryRun(ctx context.Context, request CompareDryRunRequest) (ProcessResult, error) {
+	if err := validateCompareDryRunRequest(request); err != nil {
+		return ProcessResult{ExitCode: -1}, err
+	}
+
+	args := r.compareArgs(request)
+	result, err := r.runner.Run(ctx, r.binary, args, nil)
+	if err != nil {
+		return result, fmt.Errorf("run rsync: %w", err)
+	}
+	return result, nil
 }
 
 // Upload runs rsync for a file or directory transfer.
@@ -96,6 +118,41 @@ func validateRsyncRequest(request RsyncRequest) error {
 		return fmt.Errorf("stat rsync source %q: %w", request.Source, err)
 	}
 	return nil
+}
+
+func validateCompareDryRunRequest(request CompareDryRunRequest) error {
+	if strings.TrimSpace(request.Source) == "" {
+		return fmt.Errorf("rsync source is required")
+	}
+	if strings.TrimSpace(request.Destination) == "" {
+		return fmt.Errorf("rsync destination is required")
+	}
+	info, err := os.Stat(request.Source)
+	if err != nil {
+		return fmt.Errorf("stat rsync source %q: %w", request.Source, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("rsync source %q is not a directory", request.Source)
+	}
+	return nil
+}
+
+func (r *Rsync) compareArgs(request CompareDryRunRequest) []string {
+	args := []string{
+		"-a",
+		"--dry-run",
+		"--itemize-changes",
+		"--stats",
+		"--human-readable",
+	}
+	if request.Delete {
+		args = append(args, "--delete")
+	}
+	if request.SSH != nil {
+		args = append(args, "-e", rsyncSSHCommand(*request.SSH))
+	}
+	args = append(args, request.Source, request.Destination)
+	return args
 }
 
 func (r *Rsync) args(request RsyncRequest) []string {

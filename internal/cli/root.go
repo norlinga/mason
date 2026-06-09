@@ -58,9 +58,9 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newInfoCommand(stdout, stderr, defaultReadRun))
 	cmd.AddCommand(newURLCommand(stdout, stderr, defaultReadRun))
 	cmd.AddCommand(newSyncCommand(stdout, stderr, defaultSyncRun))
-	cmd.AddCommand(stubCommand("deploy", "Deploy a build directory"))
-	cmd.AddCommand(stubCommand("status", "Preview a deploy without transferring files"))
-	cmd.AddCommand(stubCommand("init", "Scaffold a project .mason file"))
+	cmd.AddCommand(newDeployCommand(stdout, stderr, defaultDeployRun))
+	cmd.AddCommand(newStatusCommand(stdout, stderr, defaultDeployRun))
+	cmd.AddCommand(newInitCommand(stdout, stderr, defaultInitRun))
 
 	return cmd
 }

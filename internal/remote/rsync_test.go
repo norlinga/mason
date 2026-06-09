@@ -107,6 +107,47 @@ func TestRsyncWrapsRunnerError(t *testing.T) {
 	}
 }
 
+func TestRsyncCompareDryRunBuildsArgs(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "index.html"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+
+	runner := &fakeProcessRunner{
+		result: ProcessResult{Stdout: "Number of regular files transferred: 0\n"},
+	}
+	rsync := NewRsyncWithRunner("rsync-test", runner)
+
+	_, err := rsync.CompareDryRun(context.Background(), CompareDryRunRequest{
+		Source:      sourceDir + string(os.PathSeparator),
+		Destination: "mason@example.com:/srv/site/",
+		Delete:      true,
+		SSH:         &SSHOptions{Port: 2222, KeyPath: sourceDir},
+	})
+	if err != nil {
+		t.Fatalf("CompareDryRun: %v", err)
+	}
+
+	for _, want := range []string{"-a", "--dry-run", "--itemize-changes", "--stats", "--human-readable", "--delete", "-e"} {
+		if !slices.Contains(runner.args, want) {
+			t.Fatalf("args missing %q: %#v", want, runner.args)
+		}
+	}
+}
+
+func TestRsyncCompareDryRunRejectsFileSource(t *testing.T) {
+	source := writeTempFile(t, "demo.txt", "hello")
+	rsync := NewRsyncWithRunner("rsync", &fakeProcessRunner{})
+
+	_, err := rsync.CompareDryRun(context.Background(), CompareDryRunRequest{
+		Source:      source,
+		Destination: "dest/",
+	})
+	if err == nil {
+		t.Fatalf("CompareDryRun succeeded, want error")
+	}
+}
+
 func TestRsyncCopiesFileLocally(t *testing.T) {
 	requireRsync(t)
 
