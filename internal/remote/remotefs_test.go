@@ -18,6 +18,7 @@ func TestRemotePathJoinsRoot(t *testing.T) {
 		{root: "/srv/share/", rel: "/s/f76.mp3", want: "/srv/share/s/f76.mp3"},
 		{root: "/srv/share", rel: "", want: "/srv/share"},
 		{root: "", rel: "objects/ab/cd/hash", want: "objects/ab/cd/hash"},
+		{root: "/", rel: ".mason/manifest.json", want: "/.mason/manifest.json"},
 	}
 
 	for _, tt := range tests {

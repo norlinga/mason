@@ -114,13 +114,20 @@ func (f *SSHFS) WriteFile(ctx context.Context, remotePath string, data []byte, m
 
 // RemotePath joins a target root with a relative remote path.
 func RemotePath(root, rel string) string {
-	root = strings.TrimRight(strings.TrimSpace(root), "/")
+	root = strings.TrimSpace(root)
 	rel = strings.TrimLeft(strings.TrimSpace(rel), "/")
 	if root == "" {
 		return rel
 	}
+	root = strings.TrimRight(root, "/")
+	if root == "" {
+		root = "/"
+	}
 	if rel == "" {
 		return root
+	}
+	if root == "/" {
+		return root + rel
 	}
 	return root + "/" + rel
 }
