@@ -3,6 +3,7 @@ package links
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,10 +23,16 @@ const (
 type fakeFS struct {
 	mkdirs   []string
 	symlinks map[string]string
+	entries  map[string]remote.RemoteEntry
 	err      error
 }
 
-func newFakeFS() *fakeFS { return &fakeFS{symlinks: map[string]string{}} }
+func newFakeFS() *fakeFS {
+	return &fakeFS{
+		symlinks: map[string]string{},
+		entries:  map[string]remote.RemoteEntry{},
+	}
+}
 
 func (f *fakeFS) MkdirAll(_ context.Context, p string) error {
 	if f.err != nil {
@@ -34,11 +41,24 @@ func (f *fakeFS) MkdirAll(_ context.Context, p string) error {
 	f.mkdirs = append(f.mkdirs, p)
 	return nil
 }
+func (f *fakeFS) Lstat(_ context.Context, p string) (remote.RemoteEntry, error) {
+	if f.err != nil {
+		return remote.RemoteEntry{}, f.err
+	}
+	if entry, ok := f.entries[p]; ok {
+		return entry, nil
+	}
+	if target, ok := f.symlinks[p]; ok {
+		return remote.RemoteEntry{Kind: remote.EntrySymlink, Target: target}, nil
+	}
+	return remote.RemoteEntry{Kind: remote.EntryMissing}, nil
+}
 func (f *fakeFS) Symlink(_ context.Context, link, target string) error {
 	if f.err != nil {
 		return f.err
 	}
 	f.symlinks[link] = target
+	f.entries[link] = remote.RemoteEntry{Kind: remote.EntrySymlink, Target: target}
 	return nil
 }
 func (f *fakeFS) Remove(context.Context, string) error             { return nil }
@@ -252,6 +272,45 @@ func TestEnsureShareRequiresUploadedBlob(t *testing.T) {
 	}
 	if len(fs.symlinks) != 0 || store.puts != 0 {
 		t.Fatal("missing-blob path mutated remote state")
+	}
+}
+
+func TestEnsureShareCreateRejectsExistingRemoteObjectPath(t *testing.T) {
+	fs := newFakeFS()
+	fs.entries["/srv/share/inbox/foo.mp3"] = remote.RemoteEntry{Kind: remote.EntryFile}
+	store := &fakeStore{manifest: manifestWithBlobs(blobA)}
+	svc := newService(t, fs, store)
+
+	_, err := svc.EnsureShare(context.Background(), ShareRequest{Blob: blobA, ObjectPath: "inbox/foo.mp3"})
+	if err == nil {
+		t.Fatal("EnsureShare err = nil, want remote path collision")
+	}
+	if !strings.Contains(err.Error(), "already exists as a file") {
+		t.Fatalf("err = %q, want file collision", err)
+	}
+	if len(fs.symlinks) != 0 || store.puts != 0 {
+		t.Fatal("collision mutated remote links or manifest")
+	}
+}
+
+func TestEnsureShareCreateRejectsExistingRemoteSlugBeforeMutation(t *testing.T) {
+	fs := newFakeFS()
+	fs.entries["/srv/share/s/abc123.mp3"] = remote.RemoteEntry{Kind: remote.EntryDirectory}
+	store := &fakeStore{manifest: manifestWithBlobs(blobA)}
+	svc := newService(t, fs, store)
+
+	_, err := svc.EnsureShare(context.Background(), ShareRequest{Blob: blobA, ObjectPath: "inbox/foo.mp3"})
+	if err == nil {
+		t.Fatal("EnsureShare err = nil, want remote slug collision")
+	}
+	if !strings.Contains(err.Error(), "already exists as a directory") {
+		t.Fatalf("err = %q, want directory collision", err)
+	}
+	if len(fs.symlinks) != 0 {
+		t.Fatalf("symlinks = %v, want none before rejected slug collision", fs.symlinks)
+	}
+	if store.puts != 0 {
+		t.Fatal("manifest committed despite slug collision")
 	}
 }
 

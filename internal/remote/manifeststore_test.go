@@ -322,6 +322,13 @@ func (f *memoryRemoteFS) MkdirAll(ctx context.Context, remotePath string) error 
 	return err
 }
 
+func (f *memoryRemoteFS) Lstat(_ context.Context, remotePath string) (RemoteEntry, error) {
+	if _, ok := f.runner.files[remotePath]; ok {
+		return RemoteEntry{Kind: EntryFile}, nil
+	}
+	return RemoteEntry{Kind: EntryMissing}, nil
+}
+
 func (f *memoryRemoteFS) Symlink(ctx context.Context, linkPath, target string) error {
 	_, err := f.runner.Run(ctx, "ln -sfn "+shellQuote(target)+" "+shellQuote(linkPath))
 	return err

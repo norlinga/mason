@@ -103,10 +103,11 @@ func (s *Service) create(ctx context.Context, manifest *domain.Manifest, objectP
 	}
 	ext := path.Ext(objectPath)
 
-	if err := s.linkObjectPath(ctx, objectPath, blobPath); err != nil {
-		return ShareResult{}, err
-	}
-	if err := s.linkSlug(ctx, slug, ext, blobPath); err != nil {
+	links := append(
+		[]remote.SymlinkRequest{s.objectPathLink(objectPath, blobPath)},
+		s.slugLinks(slug, ext, blobPath)...,
+	)
+	if err := s.ensureLinks(ctx, links); err != nil {
 		return ShareResult{}, err
 	}
 
@@ -134,15 +135,15 @@ func (s *Service) repoint(ctx context.Context, manifest *domain.Manifest, object
 		return ShareResult{}, fmt.Errorf("share for object path %q not found", objectPath)
 	}
 
+	var links []remote.SymlinkRequest
 	if existing.Path != nil && existing.Path.State == domain.EndpointOK {
-		if err := s.linkObjectPath(ctx, objectPath, blobPath); err != nil {
-			return ShareResult{}, err
-		}
+		links = append(links, s.objectPathLink(objectPath, blobPath))
 	}
 	if existing.Slug != nil && existing.Slug.State == domain.EndpointOK {
-		if err := s.linkSlug(ctx, existing.Slug.Value, existing.Slug.Ext, blobPath); err != nil {
-			return ShareResult{}, err
-		}
+		links = append(links, s.slugLinks(existing.Slug.Value, existing.Slug.Ext, blobPath)...)
+	}
+	if err := s.ensureLinks(ctx, links); err != nil {
+		return ShareResult{}, err
 	}
 
 	existing.Blob = blob
@@ -154,39 +155,49 @@ func (s *Service) repoint(ctx context.Context, manifest *domain.Manifest, object
 	return ShareResult{Action: domain.ShareRepoint, Share: *existing}, nil
 }
 
-// linkObjectPath creates (or replaces) the object-path symlink, creating its parent
-// directory first.
-func (s *Service) linkObjectPath(ctx context.Context, objectPath, blobPath string) error {
-	if dir := path.Dir(objectPath); dir != "." && dir != "/" {
-		if err := s.fs.MkdirAll(ctx, remote.RemotePath(s.root, dir)); err != nil {
-			return fmt.Errorf("create object dir: %w", err)
+func (s *Service) ensureLinks(ctx context.Context, links []remote.SymlinkRequest) error {
+	for _, link := range links {
+		if err := remote.CheckSafeSymlink(ctx, s.fs, link); err != nil {
+			return err
 		}
 	}
-	link := remote.RemotePath(s.root, objectPath)
-	if err := s.fs.Symlink(ctx, link, symlinkTarget(objectPath, blobPath)); err != nil {
-		return fmt.Errorf("link object path: %w", err)
+	for _, link := range links {
+		if dir := path.Dir(link.LinkRel); dir != "." && dir != "/" {
+			if err := s.fs.MkdirAll(ctx, remote.RemotePath(s.root, dir)); err != nil {
+				return fmt.Errorf("create link dir: %w", err)
+			}
+		}
+		if err := remote.EnsureSafeSymlink(ctx, s.fs, link); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// linkSlug creates the canonical slug symlink (s/{slug}{ext}) and, when the object
-// path has an extension, the bare fallback (s/{slug}). Both point at the blob.
-func (s *Service) linkSlug(ctx context.Context, slug, ext, blobPath string) error {
-	if err := s.fs.MkdirAll(ctx, remote.RemotePath(s.root, slugDir)); err != nil {
-		return fmt.Errorf("create slug dir: %w", err)
+func (s *Service) objectPathLink(objectPath, blobPath string) remote.SymlinkRequest {
+	return remote.SymlinkRequest{
+		LinkPath: remote.RemotePath(s.root, objectPath),
+		LinkRel:  objectPath,
+		Target:   symlinkTarget(objectPath, blobPath),
 	}
+}
 
+func (s *Service) slugLinks(slug, ext, blobPath string) []remote.SymlinkRequest {
 	canonical := path.Join(slugDir, slug+ext)
-	if err := s.fs.Symlink(ctx, remote.RemotePath(s.root, canonical), symlinkTarget(canonical, blobPath)); err != nil {
-		return fmt.Errorf("link slug: %w", err)
-	}
+	links := []remote.SymlinkRequest{{
+		LinkPath: remote.RemotePath(s.root, canonical),
+		LinkRel:  canonical,
+		Target:   symlinkTarget(canonical, blobPath),
+	}}
 	if ext != "" {
 		bare := path.Join(slugDir, slug)
-		if err := s.fs.Symlink(ctx, remote.RemotePath(s.root, bare), symlinkTarget(bare, blobPath)); err != nil {
-			return fmt.Errorf("link bare slug: %w", err)
-		}
+		links = append(links, remote.SymlinkRequest{
+			LinkPath: remote.RemotePath(s.root, bare),
+			LinkRel:  bare,
+			Target:   symlinkTarget(bare, blobPath),
+		})
 	}
-	return nil
+	return links
 }
 
 // symlinkTarget returns the blob path relative to the directory containing linkRel,
