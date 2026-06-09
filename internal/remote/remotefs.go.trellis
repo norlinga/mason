@@ -1,0 +1,44 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Remote Filesystem over SSH
+  "SSH-backed RemoteFS with safe Mason symlink writes and collision detection."
+
+  Provides:
+    - remote.RemoteFS @source("symbol:RemoteFS")
+    - remote.FileMode @source("symbol:FileMode")
+    - remote.EntryKind @source("symbol:EntryKind")
+    - remote.RemoteEntry @source("symbol:RemoteEntry")
+    - remote.SymlinkRequest @source("symbol:SymlinkRequest")
+    - remote.PathCollisionError @source("symbol:PathCollisionError")
+    - remote.SSHFS @source("symbol:SSHFS")
+    - remote.NewSSHFS @source("symbol:NewSSHFS")
+    - remote.CheckSafeSymlink @source("symbol:CheckSafeSymlink")
+    - remote.EnsureSafeSymlink @source("symbol:EnsureSafeSymlink")
+    - remote.RemotePath @source("symbol:RemotePath")
+
+  Consumes:
+    - remote.CommandRunner
+    - domain.BlobHex
+    - domain.BlobHashPrefix
+
+  Invariants:
+    - Mason MUST NOT overwrite non-symlink paths or user-owned symlinks not targeting objects/
+    - Missing symlink paths MUST be allowed before write
+    - RemotePath MUST join target root with site-relative paths using forward slashes
+
+  OutOfScope:
+    - Manifest read/write (owned by the manifest store)
+    - Blob byte transfer (owned by rsync)
+
+  Scenario (happy-path): Create managed symlink
+    Given a missing link path and a target under objects/
+    When EnsureSafeSymlink runs
+    Then the symlink is created via SSH
+
+  Scenario (negative): Path collision
+    Given an existing file or non-Mason symlink at the link path
+    When CheckSafeSymlink runs
+    Then it returns PathCollisionError

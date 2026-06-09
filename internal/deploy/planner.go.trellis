@@ -1,0 +1,46 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Deploy Planner
+  "Diffs local build_dir against remote deploy path using rsync dry-run and returns plan counts."
+
+  Provides:
+    - deploy.Runner @source("symbol:Runner")
+    - deploy.Planner @source("symbol:Planner")
+    - deploy.NewPlanner @source("symbol:NewPlanner")
+    - deploy.Plan @source("symbol:Plan")
+    - deploy.PlanOptions @source("symbol:PlanOptions")
+    - deploy.Planner.Plan
+    - deploy.ParseCompareOutput @source("symbol:ParseCompareOutput")
+
+  Consumes:
+    - config.Target
+    - remote.CompareDryRunRequest
+    - remote.RsyncDestinationFromTarget
+
+  Invariants:
+    - Plan MUST require deploy.build_dir and deploy.remote_path on the target
+    - Plan MUST run rsync with dry-run, itemize-changes, and stats only — no bytes transferred
+    - ParseCompareOutput MUST derive new, changed, unchanged, remove, and bytes-to-send from rsync stats
+
+  OutOfScope:
+    - Running deploy transfers (future M-061)
+    - CLI commands for deploy and status (future M-061)
+    - Share object store or manifest interaction
+
+  Scenario (happy-path): Plan with changes
+    Given local build_dir differs from remote
+    When Plan runs
+    Then counts and bytes-to-send reflect rsync dry-run stats
+
+  Scenario (happy-path): Already up to date
+    Given local build_dir matches remote
+    When Plan runs
+    Then transferred counts are zero and unchanged equals local file count
+
+  Scenario (negative): Missing deploy config
+    Given a target without build_dir or remote_path
+    When Plan runs
+    Then it returns a validation error before rsync

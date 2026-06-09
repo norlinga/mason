@@ -1,0 +1,53 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Deploy Orchestration
+  "Plans and executes build-directory rsync deploys with pre-flight diff and post-run summary inputs."
+
+  Provides:
+    - deploy.Rsync @source("symbol:Rsync")
+    - deploy.Service @source("symbol:Service")
+    - deploy.NewService @source("symbol:NewService")
+    - deploy.DeployOptions @source("symbol:DeployOptions")
+    - deploy.Result @source("symbol:Result")
+    - deploy.Service.Run
+    - deploy.Service.Execute @source("symbol:Execute")
+    - deploy.UpToDate @source("symbol:UpToDate")
+
+  Consumes:
+    - config.Target
+    - remote.CompareDryRunRequest
+    - remote.RsyncRequest
+    - deploy.Planner
+    - deploy.Plan
+
+  Invariants:
+    - Run MUST plan with rsync dry-run before any real transfer
+    - Run MUST skip rsync upload when DryRun is true or the plan is already up to date
+    - Deploy MUST use the same source and destination paths as the planner
+
+  OutOfScope:
+    - CLI rendering and confirmation prompts (owned by internal/cli)
+    - mason init scaffolding (future M-062)
+
+  Scenario (happy-path): Dry-run plan
+    Given DryRun is true
+    When Run executes
+    Then it returns the plan without uploading bytes
+
+  Scenario (happy-path): Deploy changes
+    Given a plan with files to send
+    When Run executes without DryRun
+    Then rsync upload runs and Result marks Deployed true
+
+  Scenario (happy-path): Already up to date
+    Given a plan with zero changes
+    When Run executes
+    Then no rsync upload runs and UpToDate is true
+
+  Scenario (negative): Missing deploy config
+    Given a target without deploy paths
+    When Run executes
+    Then it returns an error before transfer

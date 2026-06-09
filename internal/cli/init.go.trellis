@@ -1,0 +1,32 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Init Command
+  "CLI handler for mason init that scaffolds a project .mason file."
+
+  Provides:
+    - cli.newInitCommand @source("symbol:newInitCommand")
+    - cli.defaultInitRun @source("symbol:defaultInitRun")
+
+  Consumes:
+    - setup.InitProject
+    - output.WriteJSON
+
+  Invariants:
+    - init MUST write .mason in the current working directory by default
+    - init MUST refuse to overwrite an existing .mason file
+
+  OutOfScope:
+    - Interactive setup wizard (future M-070)
+
+  Scenario (happy-path): Init project
+    Given no existing .mason
+    When init runs
+    Then it reports the created config path
+
+  Scenario (negative): Existing config
+    Given .mason already exists
+    When init runs
+    Then it returns an error

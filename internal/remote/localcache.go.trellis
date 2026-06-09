@@ -1,0 +1,43 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Local Manifest Cache
+  "Mirrors remote manifest.json under the OS user cache for fast offline reads."
+
+  Provides:
+    - remote.LocalCache @source("symbol:LocalCache")
+    - remote.NewLocalCache @source("symbol:NewLocalCache")
+    - remote.NewLocalCacheAt @source("symbol:NewLocalCacheAt")
+    - remote.LocalCache.ManifestPath @source("symbol:ManifestPath")
+    - remote.LocalCache.Read @source("symbol:Read")
+    - remote.LocalCache.Write @source("symbol:Write")
+
+  Consumes:
+    - domain.ParseManifest
+    - domain.MarshalManifest
+
+  Invariants:
+    - Cache layout MUST be mason/target-id/manifest.json under the OS user cache directory
+    - Read MUST report ok=false without error when no cache exists yet
+    - Write MUST commit atomically via temp file + rename
+    - target-id MUST NOT contain path separators or traversal segments
+
+  OutOfScope:
+    - Reconciling cache against remote (owned by the sync package)
+
+  Scenario (happy-path): Cold cache read
+    Given no cached manifest for a target
+    When Read runs
+    Then ok is false and err is nil
+
+  Scenario (happy-path): Cache write
+    Given a valid manifest
+    When Write runs
+    Then the file is stored under the target cache directory
+
+  Scenario (negative): Invalid target id
+    Given a target id containing /
+    When ManifestPath or Write runs
+    Then it returns a validation error

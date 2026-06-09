@@ -1,0 +1,41 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Remote Manifest Store
+  "Authoritative RMW for .mason/manifest.json under the site root with temp-file atomic commit."
+
+  Provides:
+    - remote.ManifestStore @source("symbol:ManifestStore")
+    - remote.RemoteManifestStore @source("symbol:RemoteManifestStore")
+    - remote.NewRemoteManifestStore @source("symbol:NewRemoteManifestStore")
+    - remote.ManifestPath @source("symbol:ManifestPath")
+    - remote.RemoteManifestStore.Fetch @source("symbol:Fetch")
+    - remote.RemoteManifestStore.Put @source("symbol:Put")
+    - remote.RemoteManifestStore.Update @source("symbol:Update")
+
+  Consumes:
+    - remote.RemoteFS
+    - domain.ParseManifest
+    - domain.MarshalManifest
+
+  Invariants:
+    - Fetch MUST return an empty v1 manifest when manifest.json does not exist yet
+    - Put MUST write to manifest.json.tmp then atomically rename over manifest.json
+    - Update MUST load, mutate, validate via MarshalManifest, and commit atomically
+
+  Scenario (happy-path): First manifest
+    Given no remote manifest file
+    When Fetch runs
+    Then an empty v1 manifest is returned without error
+
+  Scenario (happy-path): Atomic update
+    Given an existing manifest
+    When Update mutates shares and commits
+    Then the remote file is replaced via temp + mv
+
+  Scenario (negative): Corrupt remote JSON
+    Given invalid manifest bytes on the server
+    When Fetch runs
+    Then it returns a parse error

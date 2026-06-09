@@ -1,0 +1,27 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Stable CLI Errors
+  "Machine-readable error codes for Mason CLI failures."
+
+  Provides:
+    - output.Code @source("symbol:Code")
+    - output.Error @source("symbol:Error")
+    - output.NewError @source("symbol:NewError")
+    - output.WithHint @source("symbol:WithHint")
+
+  Invariants:
+    - Error codes MUST remain stable for scripting (usage_error, config_error, remote_error, internal_error)
+    - Error MUST implement error and unwrap for errors.As coercion in cli.emitError
+
+  Scenario (happy-path): Coded error
+    Given a usage failure
+    When NewError is called with CodeUsage
+    Then Error() returns the message and Code is usage_error
+
+  Scenario (happy-path): Hint attachment
+    Given an existing output.Error
+    When WithHint adds guidance
+    Then Error() includes the hint in parentheses

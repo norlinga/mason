@@ -1,0 +1,26 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Output Mode Flags
+  "Derives human vs JSON output behavior from global CLI flags."
+
+  Provides:
+    - output.Options @source("symbol:Options")
+    - output.Options.DetailAllowed @source("symbol:DetailAllowed")
+    - output.Options.DebugAllowed @source("symbol:DebugAllowed")
+
+  Invariants:
+    - Quiet MUST suppress normal human detail
+    - Verbose detail MUST NOT appear when Quiet is set
+
+  Scenario (happy-path): Normal output
+    Given default Options
+    When DetailAllowed is checked
+    Then it returns true
+
+  Scenario (happy-path): Quiet mode
+    Given Options with Quiet true
+    When DetailAllowed and DebugAllowed are checked
+    Then both return false

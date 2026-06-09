@@ -1,0 +1,38 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Info Command
+  "CLI handler for mason info: detailed view of one share by object path or s/slug ref."
+
+  Provides:
+    - cli.newInfoCommand @source("symbol:newInfoCommand")
+    - cli.resolveShareRef @source("symbol:resolveShareRef")
+    - cli.defaultReadRun @source("symbol:defaultReadRun")
+
+  Consumes:
+    - cli.defaultLsRun
+    - domain.ParseRef
+    - domain.Manifest
+    - output.NewError
+
+  Invariants:
+    - resolveShareRef MUST accept object paths and s/slug refs consistently with remote-link commands
+    - Unknown refs MUST surface as usage_error
+    - JSON output MUST include per-endpoint state and blob reference count
+
+  Scenario (happy-path): Info by object path
+    Given a manifest containing the path
+    When mason info super/rad/foo.mp3 runs
+    Then endpoint states, URLs, and blob refs are printed
+
+  Scenario (happy-path): Info by slug ref
+    Given s/f76 resolves to a share
+    When mason info s/f76 runs
+    Then the same detail view is shown
+
+  Scenario (negative): Unknown ref
+    Given a ref not in the manifest
+    When mason info runs
+    Then a usage_error is returned

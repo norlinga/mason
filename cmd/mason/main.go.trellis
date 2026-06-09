@@ -1,0 +1,29 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: CLI Entrypoint
+  "Boots the mason CLI and maps command failures to a non-zero exit."
+
+  Provides:
+    - main.main @source("symbol:main")
+
+  Consumes:
+    - cli.Execute
+
+  Invariants:
+    - main MUST delegate all CLI behavior to cli.Execute and only map errors to exit code 1
+
+  OutOfScope:
+    - Command parsing, subcommand wiring, and service orchestration (owned by internal/cli)
+
+  Scenario (happy-path): Successful invocation
+    Given cli.Execute returns nil
+    When main runs
+    Then the process exits with code 0
+
+  Scenario (negative): Command failure
+    Given cli.Execute returns an error
+    When main runs
+    Then the process exits with code 1

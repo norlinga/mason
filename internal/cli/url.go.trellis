@@ -1,0 +1,37 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share URL Command
+  "CLI handler for mason url: print the short or long public URL for one share ref."
+
+  Provides:
+    - cli.newURLCommand @source("symbol:newURLCommand")
+    - cli.shareURL @source("symbol:shareURL")
+
+  Consumes:
+    - cli.defaultReadRun
+    - cli.resolveShareRef
+    - domain.ObjectURL
+    - domain.SlugURL
+
+  Invariants:
+    - Default output MUST be the served short slug URL including extension
+    - --long MUST require an object-path endpoint on the share
+    - Missing slug or path endpoints MUST surface as usage_error
+
+  Scenario (happy-path): Short URL default
+    Given a share with a slug endpoint
+    When mason url s/f76 runs
+    Then stdout prints the served short URL
+
+  Scenario (happy-path): Long URL flag
+    Given a share with an object-path endpoint
+    When mason url --long super/rad/foo.mp3 runs
+    Then stdout prints the object-path URL
+
+  Scenario (negative): Long URL without path endpoint
+    Given a slug-only share
+    When mason url --long runs
+    Then a usage_error is returned

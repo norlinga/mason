@@ -1,0 +1,37 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Upload Dedupe Decision
+  "Pure logic deciding whether share must noop, create, or repoint and whether blob bytes must upload."
+
+  Provides:
+    - domain.ShareAction @source("symbol:ShareAction")
+    - domain.ShareDecision @source("symbol:ShareDecision")
+    - domain.Manifest.DecideShare @source("symbol:DecideShare")
+
+  Consumes:
+    - domain.Manifest
+    - domain.Manifest.FindShareByPath
+
+  Invariants:
+    - DecideShare MUST perform no I/O; blob presence is read only from the manifest blobs map
+    - ShareNoop MUST apply when the object path already points at the same blob
+    - ShareCreate MUST set UploadBlob false when the blob already exists remotely
+    - ShareRepoint MUST record OldBlob for GC eligibility tracking
+
+  Scenario (happy-path): Link-only new path
+    Given a manifest where the blob exists but the object path is new
+    When DecideShare runs
+    Then Action is ShareCreate and UploadBlob is false
+
+  Scenario (happy-path): No-op same content
+    Given a manifest where the object path already references the same blob
+    When DecideShare runs
+    Then Action is ShareNoop and UploadBlob is false
+
+  Scenario (happy-path): Repoint changed content
+    Given a manifest where the object path references a different blob and the new blob is absent
+    When DecideShare runs
+    Then Action is ShareRepoint, UploadBlob is true, and OldBlob is set

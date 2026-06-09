@@ -1,0 +1,31 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Curated Object Paths
+  "Normalizes user-assigned share paths and resolves --as / default_path for share uploads."
+
+  Provides:
+    - domain.NormalizeObjectPath @source("symbol:NormalizeObjectPath")
+    - domain.ResolveSharePath @source("symbol:ResolveSharePath")
+
+  Invariants:
+    - Object paths MUST be relative, use forward slashes, and MUST NOT contain ..
+    - Paths MUST NOT begin with reserved prefixes .mason/, objects/, or s/
+    - ResolveSharePath MUST treat a trailing slash on --as as a directory prefix keeping the local filename
+
+  Scenario (happy-path): Normalize a curated path
+    Given a path with backslashes or redundant segments
+    When NormalizeObjectPath runs
+    Then it returns a canonical forward-slash path
+
+  Scenario (happy-path): Default share placement
+    Given an empty --as, a default_path, and a filename
+    When ResolveSharePath runs
+    Then it places the file at default_path/filename
+
+  Scenario (negative): Reserved prefix
+    Given an object path starting with objects/ or s/
+    When NormalizeObjectPath runs
+    Then it rejects the path

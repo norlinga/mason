@@ -1,0 +1,47 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Upload Orchestration
+  "Two-phase share workflow: ensure blob exists on the server, then ensure link endpoints via links.Service."
+
+  Provides:
+    - share.Uploader @source("symbol:Uploader")
+    - share.Linker @source("symbol:Linker")
+    - share.Service @source("symbol:Service")
+    - share.NewService @source("symbol:NewService")
+    - share.Request @source("symbol:Request")
+    - share.Result @source("symbol:Result")
+    - share.Service.Share @source("symbol:Share")
+
+  Consumes:
+    - config.Target
+    - remote.RemoteFS
+    - remote.ManifestStore
+    - links.Service
+    - domain.ResolveSharePath
+
+  Invariants:
+    - Share MUST hash locally, upload only when the blob is absent from the manifest, then link
+    - ensureBlob MUST record blob size and uploaded_at in the manifest after successful rsync
+    - Result MUST include long and short URLs derived from target base_url
+
+  OutOfScope:
+    - Remote-link mutations without upload (owned by the links package)
+    - Deploy rsync of build trees (future internal/deploy)
+
+  Scenario (happy-path): Link-only share
+    Given blob bytes already present in the remote manifest
+    When Share runs for a new object path
+    Then Uploaded is false and links are created
+
+  Scenario (happy-path): Upload then link
+    Given a new blob hash not in the manifest
+    When Share runs
+    Then the blob is rsynced, recorded, and endpoints are linked
+
+  Scenario (negative): Missing local file
+    Given a non-existent file path
+    When Share runs
+    Then it returns an error before remote mutation

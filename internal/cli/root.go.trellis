@@ -1,0 +1,29 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Mason Root Command
+  "Cobra root command wiring global flags and subcommands for the mason CLI."
+
+  Provides:
+    - cli.Execute @source("symbol:Execute")
+    - cli.NewRootCommand @source("symbol:NewRootCommand")
+
+  Invariants:
+    - Persistent flags MUST expose --target, --json, --dry-run, --yes, --quiet, --verbose, and --config
+    - SilenceUsage and SilenceErrors MUST be true so cli controls error rendering
+
+  OutOfScope:
+    - Service orchestration and remote I/O (owned by subcommand handlers and internal packages)
+    - Golden test fixtures (owned by cli test files)
+
+  Scenario (happy-path): Help on bare invocation
+    Given mason with no subcommand
+    When the root command runs
+    Then help is printed and exit is success
+
+  Scenario (happy-path): Version subcommand
+    Given mason version
+    When the version command runs
+    Then the mason version string is printed

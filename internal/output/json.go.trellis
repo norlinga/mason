@@ -1,0 +1,31 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: JSON CLI Envelope
+  "Wraps command results in a stable ok/data/error JSON envelope for --json output."
+
+  Provides:
+    - output.Envelope @source("symbol:Envelope")
+    - output.WriteJSON @source("symbol:WriteJSON")
+    - output.Success @source("symbol:Success")
+    - output.Failure @source("symbol:Failure")
+
+  Consumes:
+    - output.Error
+
+  Invariants:
+    - Successful responses MUST set ok true with data populated
+    - Failed responses MUST set ok false with error populated
+    - WriteJSON MUST emit indented, newline-terminated JSON
+
+  Scenario (happy-path): Success envelope
+    Given command data
+    When Success and WriteJSON run
+    Then stdout receives {"ok": true, "data": ...}
+
+  Scenario (negative): Failure envelope
+    Given an output.Error
+    When Failure and WriteJSON run under --json
+    Then stdout receives {"ok": false, "error": {...}}

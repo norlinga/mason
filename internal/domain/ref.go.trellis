@@ -1,0 +1,33 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Reference Parsing
+  "Interprets CLI <ref> arguments as either an object path or a short slug (s/<slug>)."
+
+  Provides:
+    - domain.RefKind @source("symbol:RefKind")
+    - domain.Ref @source("symbol:Ref")
+    - domain.ParseRef @source("symbol:ParseRef")
+    - domain.Ref.IsSlug @source("symbol:IsSlug")
+    - domain.Ref.IsPath @source("symbol:IsPath")
+
+  Invariants:
+    - An s/-prefixed token MUST be parsed as RefKindSlug; all other non-empty tokens are object paths
+    - Slug refs MUST include a value after the s/ prefix
+
+  Scenario (happy-path): Object path ref
+    Given super/rad/foo.mp3
+    When ParseRef runs
+    Then Kind is RefKindPath and Value is the full path
+
+  Scenario (happy-path): Slug ref
+    Given s/f76
+    When ParseRef runs
+    Then Kind is RefKindSlug and Value is f76
+
+  Scenario (negative): Empty ref
+    Given whitespace only
+    When ParseRef runs
+    Then it returns an error

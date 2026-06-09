@@ -1,0 +1,42 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Deploy Commands
+  "CLI handlers for mason deploy and mason status with plan, progress, and summary output."
+
+  Provides:
+    - cli.newDeployCommand @source("symbol:newDeployCommand")
+    - cli.newStatusCommand @source("symbol:newStatusCommand")
+    - cli.defaultDeployRun @source("symbol:defaultDeployRun")
+
+  Consumes:
+    - deploy.Service
+    - deploy.Result
+    - output.WriteJSON
+    - output.HumanSize
+
+  Invariants:
+    - status MUST always run as a dry-run plan and MUST NOT transfer bytes
+    - deploy MUST honor global --dry-run and MUST require confirmation before --delete removes remote files unless --yes
+    - Plain output MUST show target, plan line, and summary or up-to-date message
+
+  OutOfScope:
+    - Deploy planner parsing (owned by internal/deploy)
+    - mason init scaffolding (future M-062)
+
+  Scenario (happy-path): Status plan
+    Given a successful deploy plan
+    When status runs
+    Then plan output is rendered without deploying
+
+  Scenario (happy-path): Deploy with changes
+    Given a plan with files to send and confirmation skipped via --yes
+    When deploy runs
+    Then plan and summary output are rendered
+
+  Scenario (negative): Delete confirmation declined
+    Given --delete with files to remove and no --yes
+    When the user declines confirmation
+    Then deploy exits without transferring bytes

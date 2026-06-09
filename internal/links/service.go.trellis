@@ -1,0 +1,45 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Link Mutations
+  "Creates and re-points share symlinks and patches the authoritative manifest without moving blob bytes."
+
+  Provides:
+    - links.Service @source("symbol:Service")
+    - links.NewService @source("symbol:NewService")
+    - links.ShareRequest @source("symbol:ShareRequest")
+    - links.ShareResult @source("symbol:ShareResult")
+    - links.Service.EnsureShare @source("symbol:EnsureShare")
+
+  Consumes:
+    - remote.ManifestStore
+    - remote.EnsureSafeSymlink
+    - domain.Manifest.DecideShare
+    - domain.MintSlug
+
+  Invariants:
+    - EnsureShare MUST require the blob to already exist in the manifest (two-phase share)
+    - New shares MUST mint a slug, reserve it, and create object-path plus canonical and bare slug symlinks
+    - Repoint MUST update symlinks only for endpoints still in EndpointOK state
+    - Symlink targets MUST stay relative to each link parent directory under the site root
+
+  OutOfScope:
+    - Blob byte upload (owned by the share package)
+    - mv, cp, rm, disable, enable, prune commands (future links mutations)
+
+  Scenario (happy-path): Create new share
+    Given a manifest with the blob recorded but no share at the object path
+    When EnsureShare runs
+    Then Action is ShareCreate, symlinks are written, and manifest is committed
+
+  Scenario (happy-path): No-op same blob
+    Given an object path already pointing at the same blob
+    When EnsureShare runs
+    Then Action is ShareNoop and no manifest write occurs
+
+  Scenario (negative): Blob not uploaded
+    Given a blob key absent from manifest.Blobs
+    When EnsureShare runs
+    Then it returns an error instructing the caller to upload first

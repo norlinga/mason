@@ -1,0 +1,25 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share URL Construction
+  "Builds long object-path URLs and served short slug URLs from a target base_url."
+
+  Provides:
+    - domain.ObjectURL @source("symbol:ObjectURL")
+    - domain.SlugURL @source("symbol:SlugURL")
+
+  Invariants:
+    - ObjectURL MUST join baseURL and objectPath with a single slash boundary
+    - SlugURL MUST serve at {baseURL}/s/{slug}{ext} so the web server infers Content-Type from ext
+
+  Scenario (happy-path): Long URL
+    Given base https://share.example.com and path inbox/foo.mp3
+    When ObjectURL runs
+    Then it returns https://share.example.com/inbox/foo.mp3
+
+  Scenario (happy-path): Short URL with extension
+    Given base https://share.example.com, slug f76, and ext .mp3
+    When SlugURL runs
+    Then it returns https://share.example.com/s/f76.mp3

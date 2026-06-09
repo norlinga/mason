@@ -1,0 +1,33 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Content-Addressed Blob Keys
+  "Hashes content with SHA-256 and maps blob keys to fan-out storage paths under objects/."
+
+  Provides:
+    - domain.BlobHashPrefix @source("symbol:BlobHashPrefix")
+    - domain.HashReader @source("symbol:HashReader")
+    - domain.HashBytes @source("symbol:HashBytes")
+    - domain.BlobHex @source("symbol:BlobHex")
+    - domain.BlobPath @source("symbol:BlobPath")
+
+  Invariants:
+    - Blob keys MUST use the sha256: prefix followed by 64 lowercase hex digits
+    - BlobPath MUST return objects/{hash[0:2]}/{hash[2:4]}/{hash} with no file extension
+
+  Scenario (happy-path): Hash a stream
+    Given readable content
+    When HashReader runs
+    Then it returns sha256:<hex> without loading the entire payload into memory first
+
+  Scenario (happy-path): Storage path from key
+    Given a valid blob key
+    When BlobPath runs
+    Then it returns the two-level fan-out path under objects/
+
+  Scenario (negative): Invalid blob key
+    Given a string without the sha256: prefix or with bad hex
+    When BlobHex or BlobPath runs
+    Then it returns a validation error

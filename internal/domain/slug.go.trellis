@@ -1,0 +1,44 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Short Slug Identity
+  "Mints 6-character base62 slug identities and maintains the manifest reservation table."
+
+  Provides:
+    - domain.SlugLength @source("symbol:SlugLength")
+    - domain.ValidateSlug @source("symbol:ValidateSlug")
+    - domain.MintSlug @source("symbol:MintSlug")
+    - domain.MintSlugWith @source("symbol:MintSlugWith")
+    - domain.Manifest.SlugReserved @source("symbol:SlugReserved")
+    - domain.Manifest.ReserveSlug @source("symbol:ReserveSlug")
+    - domain.Manifest.MintAndReserveSlug @source("symbol:MintAndReserveSlug")
+
+  Consumes:
+    - domain.Manifest
+
+  Invariants:
+    - Slugs MUST be exactly SlugLength base62 characters
+    - Reserved slugs MUST NOT be auto-reused for different content
+    - MintAndReserveSlug MUST record the reservation before returning the slug
+
+  Scenario (happy-path): Mint unused slug
+    Given a reservation predicate that rejects taken slugs
+    When MintSlug runs
+    Then it returns a valid 6-character base62 slug not already reserved
+
+  Scenario (happy-path): Reserve on manifest
+    Given a fresh slug
+    When ReserveSlug runs on a manifest
+    Then the slug appears in reserved_slugs exactly once
+
+  Scenario (negative): Invalid slug shape
+    Given a slug with wrong length or non-base62 characters
+    When ValidateSlug runs
+    Then it returns an error
+
+  Scenario (negative): Exhausted mint retries
+    Given a reservation predicate that rejects every candidate
+    When MintSlug runs
+    Then it fails after bounded attempts

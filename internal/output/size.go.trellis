@@ -1,0 +1,24 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Human-Readable Sizes
+  "Formats byte counts for columnar CLI output using binary (1024) units."
+
+  Provides:
+    - output.HumanSize @source("symbol:HumanSize")
+
+  Invariants:
+    - Values under 1024 bytes MUST render as N B
+    - Larger values MUST use K/M/G/T/P/E binary units with one decimal place
+
+  Scenario (happy-path): Small file
+    Given 5 bytes
+    When HumanSize runs
+    Then it returns 5 B
+
+  Scenario (happy-path): Megabyte scale
+    Given 4412345 bytes
+    When HumanSize runs
+    Then it returns a compact binary MB string

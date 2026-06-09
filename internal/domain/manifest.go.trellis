@@ -1,0 +1,63 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Authoritative Share Manifest
+  "Models, validates, serializes, and indexes the remote manifest.json schema (v1)."
+
+  Provides:
+    - domain.ManifestVersion @source("symbol:ManifestVersion")
+    - domain.EndpointState @source("symbol:EndpointState")
+    - domain.Manifest @source("symbol:Manifest")
+    - domain.Blob @source("symbol:Blob")
+    - domain.Share @source("symbol:Share")
+    - domain.Endpoint @source("symbol:Endpoint")
+    - domain.SlugEndpoint @source("symbol:SlugEndpoint")
+    - domain.Indexes @source("symbol:Indexes")
+    - domain.NewManifest @source("symbol:NewManifest")
+    - domain.ParseManifest @source("symbol:ParseManifest")
+    - domain.MarshalManifest @source("symbol:MarshalManifest")
+    - domain.Manifest.Validate @source("symbol:Validate")
+    - domain.EndpointState.Valid @source("symbol:Valid")
+    - domain.Share.EndpointRefCount @source("symbol:EndpointRefCount")
+    - domain.Share.Active @source("symbol:Active")
+    - domain.Manifest.BlobRefCount @source("symbol:BlobRefCount")
+    - domain.Manifest.BlobRefCounts @source("symbol:BlobRefCounts")
+    - domain.Manifest.OrphanedBlobs @source("symbol:OrphanedBlobs")
+    - domain.BuildIndexes @source("symbol:BuildIndexes")
+    - domain.Manifest.FindShareByPath @source("symbol:FindShareByPath")
+    - domain.Manifest.FindShareBySlug @source("symbol:FindShareBySlug")
+
+  Consumes:
+    - domain.BlobHex
+    - domain.NormalizeObjectPath
+    - domain.ValidateSlug
+
+  Invariants:
+    - Manifest version MUST be ManifestVersion (1)
+    - Each share MUST retain at least one endpoint (path and/or slug)
+    - Object paths and slug identities MUST be unique across active shares
+    - Every slug endpoint value MUST appear in reserved_slugs
+    - Blob reference counts MUST count manifest endpoints; disabled endpoints still count
+    - OrphanedBlobs MUST list blobs with zero endpoint references
+
+  Scenario (happy-path): Parse valid manifest
+    Given well-formed manifest JSON at version 1
+    When ParseManifest runs
+    Then a validated Manifest is returned
+
+  Scenario (happy-path): Orphan detection
+    Given blobs listed with no share endpoints referencing them
+    When OrphanedBlobs runs
+    Then those blob keys are returned sorted
+
+  Scenario (negative): Duplicate object path
+    Given two shares claiming the same object path
+    When Validate runs
+    Then it returns a duplicate path error
+
+  Scenario (negative): Unreserved slug
+    Given a share slug not present in reserved_slugs
+    When Validate runs
+    Then it returns an error

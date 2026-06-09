@@ -1,0 +1,44 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: YAML Configuration
+  "Loads, validates, discovers, and resolves Mason target configuration from .mason files."
+
+  Provides:
+    - config.Config @source("symbol:Config")
+    - config.Target @source("symbol:Target")
+    - config.ShareConfig @source("symbol:ShareConfig")
+    - config.DeployConfig @source("symbol:DeployConfig")
+    - config.ResolvedTarget @source("symbol:ResolvedTarget")
+    - config.Parse @source("symbol:Parse")
+    - config.LoadFile @source("symbol:LoadFile")
+    - config.Config.Validate @source("symbol:Validate")
+    - config.Config.ResolveTarget @source("symbol:ResolveTarget")
+    - config.Discover @source("symbol:Discover")
+
+  Invariants:
+    - Config MUST define a default target name that exists in targets
+    - Each target MUST require host, user, root, and base_url
+    - Discover MUST walk upward from cwd for .mason, then fall back to ~/.mason
+
+  Scenario (happy-path): Load project config
+    Given a valid .mason file in the tree
+    When Discover and LoadFile run from a subdirectory
+    Then the nearest ancestor .mason is loaded and validated
+
+  Scenario (happy-path): Resolve explicit target
+    Given a config with multiple targets
+    When ResolveTarget is called with a target name override
+    Then the named target is returned
+
+  Scenario (negative): Missing default target
+    Given YAML where default names an undefined target
+    When Validate runs
+    Then it returns an error
+
+  Scenario (negative): No config found
+    Given no .mason in the ancestor chain or home directory
+    When Discover runs
+    Then it returns an error

@@ -1,0 +1,38 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Share Command
+  "CLI handler for mason share: publish a local file and print URLs."
+
+  Provides:
+    - cli.newShareCommand @source("symbol:newShareCommand")
+    - cli.defaultShareRun @source("symbol:defaultShareRun")
+
+  Consumes:
+    - share.Service.Share
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - output.WriteJSON
+
+  Invariants:
+    - --as flag MUST be forwarded to share.Request.As for curated object path resolution
+    - Human output MUST report upload vs link-only and print long and short URLs
+    - Quiet mode MUST print only the short URL
+    - JSON output MUST use the stable shareJSON shape under output.Success
+
+  Scenario (happy-path): Share with human output
+    Given a successful share result
+    When renderShare runs without --json
+    Then stdout shows path, upload status, and URLs
+
+  Scenario (happy-path): Share JSON
+    Given --json and a successful share
+    When the command completes
+    Then stdout is a success envelope with action, hash, and URLs
+
+  Scenario (negative): Share failure
+    Given share returns an error
+    When the command runs
+    Then emitError renders the failure

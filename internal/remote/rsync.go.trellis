@@ -1,0 +1,49 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Rsync Transfer
+  "Uploads local files to the VPS through the rsync binary with optional SSH transport."
+
+  Provides:
+    - remote.Rsync @source("symbol:Rsync")
+    - remote.RsyncRequest @source("symbol:RsyncRequest")
+    - remote.CompareDryRunRequest @source("symbol:CompareDryRunRequest")
+    - remote.RsyncProgress @source("symbol:RsyncProgress")
+    - remote.ProcessResult @source("symbol:ProcessResult")
+    - remote.ProcessRunner @source("symbol:ProcessRunner")
+    - remote.NewRsync @source("symbol:NewRsync")
+    - remote.NewRsyncWithRunner @source("symbol:NewRsyncWithRunner")
+    - remote.Rsync.Upload @source("symbol:Upload")
+    - remote.Rsync.CompareDryRun @source("symbol:CompareDryRun")
+    - remote.RsyncDestinationFromTarget @source("symbol:RsyncDestinationFromTarget")
+
+  Consumes:
+    - remote.SSHOptions
+    - config.Target
+
+  Invariants:
+    - Upload MUST validate that the local source path exists before invoking rsync
+    - CompareDryRun MUST use dry-run, itemize-changes, and stats without transferring bytes
+    - RsyncDestinationFromTarget MUST format an SSH rsync destination as user, host, and remote path
+    - Progress callbacks MUST receive parsed lines when rsync progress output is present
+
+  OutOfScope:
+    - Deploy plan parsing and aggregation (owned by internal/deploy)
+    - Remote manifest updates after upload (callers record blobs separately)
+
+  Scenario (happy-path): Upload file
+    Given a readable local source and rsync destination
+    When Upload runs
+    Then rsync exits 0 and ProcessResult captures output
+
+  Scenario (happy-path): Compare dry-run
+    Given a local directory and rsync destination
+    When CompareDryRun runs
+    Then rsync exits 0 with itemized change and stats output
+
+  Scenario (negative): Missing source
+    Given a non-existent local path
+    When Upload runs
+    Then it returns a validation error before spawning rsync

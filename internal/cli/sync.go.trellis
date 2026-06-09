@@ -1,0 +1,41 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Manifest Sync Command
+  "CLI handler for mason sync: reconcile local cache from the authoritative remote manifest."
+
+  Provides:
+    - cli.newSyncCommand @source("symbol:newSyncCommand")
+    - cli.defaultSyncRun @source("symbol:defaultSyncRun")
+
+  Consumes:
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - remote.Sync
+
+  Invariants:
+    - defaultSyncRun MUST pass stderr as the divergence warn writer
+    - JSON output MUST expose updated and diverged booleans
+    - Quiet mode MUST suppress human success messages
+
+  Scenario (happy-path): Cache already current
+    Given local cache matches remote
+    When mason sync runs
+    Then human output reports already up to date
+
+  Scenario (happy-path): Cache updated
+    Given stale or absent cache
+    When mason sync runs
+    Then human output reports synced from remote
+
+  Scenario (happy-path): Divergence warning
+    Given a pre-existing cache that differed from remote
+    When mason sync runs
+    Then stderr receives a divergence warning and JSON diverged is true
+
+  Scenario (negative): Sync failure
+    Given remote.Sync returns an error
+    When defaultSyncRun runs
+    Then the command propagates the failure

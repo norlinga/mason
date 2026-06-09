@@ -1,0 +1,38 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: SSH Command Runner
+  "Connects to configured VPS targets and runs shell commands over SSH."
+
+  Provides:
+    - remote.SSHOptions @source("symbol:SSHOptions")
+    - remote.CommandResult @source("symbol:CommandResult")
+    - remote.CommandRunner @source("symbol:CommandRunner")
+    - remote.SSH @source("symbol:SSH")
+    - remote.SSHDialer @source("symbol:SSHDialer")
+    - remote.SSHClient @source("symbol:SSHClient")
+    - remote.SSHSession @source("symbol:SSHSession")
+    - remote.SSHOptionsFromTarget @source("symbol:SSHOptionsFromTarget")
+    - remote.NewSSH @source("symbol:NewSSH")
+    - remote.NewSSHWithDialer @source("symbol:NewSSHWithDialer")
+    - remote.SSH.Run @source("symbol:Run")
+
+  Consumes:
+    - config.Target
+
+  Invariants:
+    - SSHOptionsFromTarget MUST default port 22 and a 30s dial timeout when unset
+    - Run MUST capture stdout, stderr, and exit code from the remote session
+    - Empty key_path MUST fall back to ~/.ssh/id_ed25519
+
+  Scenario (happy-path): Remote command succeeds
+    Given valid SSH credentials and a reachable host
+    When Run executes a shell command
+    Then ExitCode is 0 and stdout is captured
+
+  Scenario (negative): Connection failure
+    Given an unreachable host
+    When Run is invoked
+    Then it returns a connect error with ExitCode -1

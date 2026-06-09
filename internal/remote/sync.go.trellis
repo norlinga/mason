@@ -1,0 +1,37 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Manifest Cache Sync
+  "Reconciles local cache from the authoritative remote manifest; remote always wins."
+
+  Provides:
+    - remote.SyncResult @source("symbol:SyncResult")
+    - remote.Sync @source("symbol:Sync")
+
+  Consumes:
+    - remote.ManifestStore
+    - remote.LocalCache
+    - domain.MarshalManifest
+
+  Invariants:
+    - Remote manifest MUST always win over local cache content
+    - A cold (absent) cache MUST populate without counting as divergence
+    - Corrupt or stale cache MUST be overwritten; Diverged MUST be true when a prior cache differed
+    - When warn is non-nil and Diverged is true, a warning MUST be written to warn
+
+  Scenario (happy-path): Already in sync
+    Given cache bytes equal the remote manifest
+    When Sync runs
+    Then CacheUpdated is false and Diverged is false
+
+  Scenario (happy-path): Cold cache populate
+    Given no local cache file
+    When Sync runs
+    Then CacheUpdated is true and Diverged is false
+
+  Scenario (happy-path): Diverged overwrite
+    Given a cached manifest that differs from remote
+    When Sync runs with a warn writer
+    Then the cache is replaced, Diverged is true, and a warning is emitted

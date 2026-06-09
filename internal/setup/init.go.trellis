@@ -1,0 +1,32 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: Project Init Scaffold
+  "Writes a valid project .mason config with deploy defaults for a new site."
+
+  Provides:
+    - setup.InitProject @source("symbol:InitProject")
+    - setup.ProjectConfigTemplate @source("symbol:ProjectConfigTemplate")
+
+  Consumes:
+    - config.Parse
+
+  Invariants:
+    - InitProject MUST refuse to overwrite an existing .mason file
+    - ProjectConfigTemplate MUST parse through config.Parse without error
+
+  OutOfScope:
+    - Interactive setup wizard (future M-070)
+    - Remote server bootstrap (future M-071)
+
+  Scenario (happy-path): Scaffold new project
+    Given a directory without .mason
+    When InitProject runs
+    Then a valid YAML config is written
+
+  Scenario (negative): Existing config
+    Given .mason already exists
+    When InitProject runs
+    Then it returns an error without overwriting the file

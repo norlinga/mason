@@ -1,0 +1,46 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-06-09
+
+Feature: List Shares Command
+  "CLI handler for mason ls: columnar or JSON listing from the local manifest cache."
+
+  Provides:
+    - cli.newLsCommand @source("symbol:newLsCommand")
+    - cli.defaultLsRun @source("symbol:defaultLsRun")
+    - cli.buildShareRows @source("symbol:buildShareRows")
+    - cli.renderTable @source("symbol:renderTable")
+
+  Consumes:
+    - cli.resolveTarget
+    - cli.newRemoteStack
+    - cli.remoteSync
+    - remote.LocalCache.Read
+    - domain.Manifest
+
+  Invariants:
+    - defaultLsRun MUST best-effort sync cache then read from LocalCache
+    - Optional prefix MUST filter by object-path prefix only
+    - Rows MUST sort deterministically by object path then slug
+    - Plain output MUST use a fixed columnar grid greppable without JSON
+
+  Scenario (happy-path): List all shares
+    Given a cached manifest with shares
+    When mason ls runs
+    Then columnar PATH SLUG SIZE HASH SHARED STATE rows are printed
+
+  Scenario (happy-path): Prefix filter
+    Given shares under inbox/ and super/
+    When mason ls inbox runs
+    Then only inbox/ paths appear
+
+  Scenario (happy-path): Empty manifest
+    Given no shares
+    When mason ls runs without --quiet
+    Then No shares. is printed
+
+  Scenario (negative): Cache read failure
+    Given LocalCache.Read returns an error
+    When defaultLsRun runs
+    Then the command fails before rendering
