@@ -22,6 +22,7 @@ const (
 // fakeFS records symlink and mkdir operations.
 type fakeFS struct {
 	mkdirs   []string
+	removes  []string
 	symlinks map[string]string
 	entries  map[string]remote.RemoteEntry
 	err      error
@@ -61,7 +62,15 @@ func (f *fakeFS) Symlink(_ context.Context, link, target string) error {
 	f.entries[link] = remote.RemoteEntry{Kind: remote.EntrySymlink, Target: target}
 	return nil
 }
-func (f *fakeFS) Remove(context.Context, string) error             { return nil }
+func (f *fakeFS) Remove(_ context.Context, p string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.removes = append(f.removes, p)
+	delete(f.symlinks, p)
+	delete(f.entries, p)
+	return nil
+}
 func (f *fakeFS) ReadFile(context.Context, string) ([]byte, error) { return nil, nil }
 func (f *fakeFS) WriteFile(context.Context, string, []byte, remote.FileMode) error {
 	return nil
@@ -348,6 +357,62 @@ func TestEnsureSharePutErrorPropagates(t *testing.T) {
 
 	if _, err := svc.EnsureShare(context.Background(), ShareRequest{Blob: blobA, ObjectPath: "inbox/foo.mp3"}); err == nil {
 		t.Fatal("EnsureShare err = nil on put failure, want error")
+	}
+	if len(fs.symlinks) != 0 {
+		t.Fatalf("symlinks = %v, want rollback to remove created links", fs.symlinks)
+	}
+	wantRemoves := map[string]bool{
+		"/srv/share/inbox/foo.mp3": false,
+		"/srv/share/s/abc123.mp3":  false,
+		"/srv/share/s/abc123":      false,
+	}
+	for _, removed := range fs.removes {
+		if _, ok := wantRemoves[removed]; ok {
+			wantRemoves[removed] = true
+		}
+	}
+	for path, removed := range wantRemoves {
+		if !removed {
+			t.Fatalf("rollback did not remove %q; removes = %v", path, fs.removes)
+		}
+	}
+	if len(store.manifest.Shares) != 0 {
+		t.Fatalf("manifest shares = %v, want restored after failed put", store.manifest.Shares)
+	}
+	if store.manifest.SlugReserved("abc123") {
+		t.Fatal("slug reservation remained after failed create")
+	}
+}
+
+func TestEnsureShareRepointPutErrorRollsBackSymlinksAndManifest(t *testing.T) {
+	store := &fakeStore{manifest: manifestWithBlobs(blobA, blobB), putErr: errors.New("write failed")}
+	store.manifest.Shares = append(store.manifest.Shares, domain.Share{
+		ID:   "existing",
+		Blob: blobA,
+		Path: &domain.Endpoint{Value: "inbox/foo.mp3", State: domain.EndpointOK},
+		Slug: &domain.SlugEndpoint{Value: "zzz999", Ext: ".mp3", State: domain.EndpointOK},
+	})
+	fs := newFakeFS()
+	fs.symlinks["/srv/share/inbox/foo.mp3"] = "../" + blobAPath
+	fs.symlinks["/srv/share/s/zzz999.mp3"] = "../" + blobAPath
+	fs.symlinks["/srv/share/s/zzz999"] = "../" + blobAPath
+	svc := newService(t, fs, store)
+
+	if _, err := svc.EnsureShare(context.Background(), ShareRequest{Blob: blobB, ObjectPath: "inbox/foo.mp3"}); err == nil {
+		t.Fatal("EnsureShare err = nil on put failure, want error")
+	}
+	if store.manifest.Shares[0].Blob != blobA {
+		t.Fatalf("manifest blob = %q, want restored to A", store.manifest.Shares[0].Blob)
+	}
+	wantLinks := map[string]string{
+		"/srv/share/inbox/foo.mp3": "../" + blobAPath,
+		"/srv/share/s/zzz999.mp3":  "../" + blobAPath,
+		"/srv/share/s/zzz999":      "../" + blobAPath,
+	}
+	for link, target := range wantLinks {
+		if got := fs.symlinks[link]; got != target {
+			t.Fatalf("symlink %q = %q, want rolled back to %q", link, got, target)
+		}
 	}
 }
 

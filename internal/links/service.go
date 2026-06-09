@@ -111,6 +111,8 @@ func (s *Service) create(ctx context.Context, manifest *domain.Manifest, objectP
 		return ShareResult{}, err
 	}
 
+	previousShares := append([]domain.Share(nil), manifest.Shares...)
+	previousReservedSlugs := append([]string(nil), manifest.ReservedSlugs...)
 	now := s.now().UTC()
 	share := domain.Share{
 		ID:        s.newID(),
@@ -124,7 +126,10 @@ func (s *Service) create(ctx context.Context, manifest *domain.Manifest, objectP
 	manifest.ReserveSlug(slug)
 
 	if err := s.store.Put(ctx, manifest); err != nil {
-		return ShareResult{}, fmt.Errorf("write manifest: %w", err)
+		manifest.Shares = previousShares
+		manifest.ReservedSlugs = previousReservedSlugs
+		rollbackErr := s.removeLinks(ctx, links)
+		return ShareResult{}, manifestRollbackError(err, rollbackErr)
 	}
 	return ShareResult{Action: domain.ShareCreate, Share: share}, nil
 }
@@ -135,13 +140,15 @@ func (s *Service) repoint(ctx context.Context, manifest *domain.Manifest, object
 		return ShareResult{}, fmt.Errorf("share for object path %q not found", objectPath)
 	}
 
-	var links []remote.SymlinkRequest
-	if existing.Path != nil && existing.Path.State == domain.EndpointOK {
-		links = append(links, s.objectPathLink(objectPath, blobPath))
+	oldBlob := existing.Blob
+	oldUpdatedAt := existing.UpdatedAt
+	oldBlobPath, err := domain.BlobPath(oldBlob)
+	if err != nil {
+		return ShareResult{}, err
 	}
-	if existing.Slug != nil && existing.Slug.State == domain.EndpointOK {
-		links = append(links, s.slugLinks(existing.Slug.Value, existing.Slug.Ext, blobPath)...)
-	}
+
+	links := s.activeEndpointLinks(existing, blobPath)
+	rollbackLinks := s.activeEndpointLinks(existing, oldBlobPath)
 	if err := s.ensureLinks(ctx, links); err != nil {
 		return ShareResult{}, err
 	}
@@ -150,7 +157,10 @@ func (s *Service) repoint(ctx context.Context, manifest *domain.Manifest, object
 	existing.UpdatedAt = s.now().UTC()
 
 	if err := s.store.Put(ctx, manifest); err != nil {
-		return ShareResult{}, fmt.Errorf("write manifest: %w", err)
+		existing.Blob = oldBlob
+		existing.UpdatedAt = oldUpdatedAt
+		rollbackErr := s.ensureLinks(ctx, rollbackLinks)
+		return ShareResult{}, manifestRollbackError(err, rollbackErr)
 	}
 	return ShareResult{Action: domain.ShareRepoint, Share: *existing}, nil
 }
@@ -172,6 +182,33 @@ func (s *Service) ensureLinks(ctx context.Context, links []remote.SymlinkRequest
 		}
 	}
 	return nil
+}
+
+func (s *Service) removeLinks(ctx context.Context, links []remote.SymlinkRequest) error {
+	for _, link := range links {
+		if err := s.fs.Remove(ctx, link.LinkPath); err != nil {
+			return fmt.Errorf("remove link %q: %w", link.LinkPath, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) activeEndpointLinks(share *domain.Share, blobPath string) []remote.SymlinkRequest {
+	var links []remote.SymlinkRequest
+	if share.Path != nil && share.Path.State == domain.EndpointOK {
+		links = append(links, s.objectPathLink(share.Path.Value, blobPath))
+	}
+	if share.Slug != nil && share.Slug.State == domain.EndpointOK {
+		links = append(links, s.slugLinks(share.Slug.Value, share.Slug.Ext, blobPath)...)
+	}
+	return links
+}
+
+func manifestRollbackError(commitErr, rollbackErr error) error {
+	if rollbackErr == nil {
+		return fmt.Errorf("write manifest: %w", commitErr)
+	}
+	return fmt.Errorf("write manifest: %w; rollback failed: %v", commitErr, rollbackErr)
 }
 
 func (s *Service) objectPathLink(objectPath, blobPath string) remote.SymlinkRequest {

@@ -1,1 +1,4 @@
 .contextq-data/
+
+# Trellis machine-documentation sidecars (local agent contract layer)
+*.trellis
