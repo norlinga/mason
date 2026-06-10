@@ -1,7 +1,7 @@
 .PHONY: build test lint
 
 build:
-	go build ./...
+	go build -ldflags="-s -w" -o mason ./cmd/mason
 
 test:
 	go test ./...
