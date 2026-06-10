@@ -9,11 +9,11 @@ import (
 
 func staticTarget() config.Target {
 	return config.Target{
-		Host:    "travel.example.com",
+		Host:    "vps.example.net",
 		User:    "mason",
-		Root:    "/var/www/travel.example.com",
-		BaseURL: "https://travel.example.com",
-		Deploy:  config.DeployConfig{RemotePath: "/var/www/travel.example.com"},
+		Root:    "/var/www/blog.example.com",
+		BaseURL: "https://blog.example.com",
+		Deploy:  config.DeployConfig{RemotePath: "/var/www/blog.example.com"},
 	}
 }
 
@@ -23,6 +23,16 @@ func staticParams() SiteInitParams {
 		TargetName: "home",
 		Reload:     true,
 	}
+}
+
+// apexParams returns params for an apex-domain target (example.com), the
+// generic counterpart to the subdomain staticParams (blog.example.com).
+func apexParams() SiteInitParams {
+	p := staticParams()
+	p.Target.Root = "/var/www/example.com"
+	p.Target.BaseURL = "https://example.com"
+	p.Target.Deploy.RemotePath = "/var/www/example.com"
+	return p
 }
 
 func TestSiteInitScriptInvariants(t *testing.T) {
@@ -35,11 +45,11 @@ func TestSiteInitScriptInvariants(t *testing.T) {
 		"set -eu",
 		// static web root, group-readable for Caddy
 		"install -d -m 2750 -o \"$MASON_USER\" -g \"$MASON_GROUP\" \"$SITE_ROOT\"",
-		"SITE_ROOT='/var/www/travel.example.com'",
+		"SITE_ROOT='/var/www/blog.example.com'",
 		// caddy reads via group
 		"usermod -aG \"$MASON_GROUP\" \"$CADDY_USER\"",
 		// plain static vhost
-		"travel.example.com {",
+		"blog.example.com {",
 		"file_server",
 		// single import line, idempotent
 		"grep -qF 'import /etc/caddy/mason.d/*.caddy' \"$CADDYFILE\" 2>/dev/null ||",
@@ -173,6 +183,109 @@ func TestSiteInitScriptRequiresHost(t *testing.T) {
 	p.Target.BaseURL = ""
 	if _, err := SiteInitScript(p); err == nil {
 		t.Fatal("missing site address err = nil, want error")
+	}
+}
+
+func TestSiteInitScriptSubdomainNoRedirect(t *testing.T) {
+	// A subdomain must stay a single plain block with no www handling.
+	script, err := SiteInitScript(staticParams())
+	if err != nil {
+		t.Fatalf("SiteInitScript: %v", err)
+	}
+	if strings.Contains(script, "redir") || strings.Contains(script, "www.") {
+		t.Fatalf("subdomain script must not emit a www redirect\n%s", script)
+	}
+}
+
+func TestSiteInitScriptApexDomain(t *testing.T) {
+	script, err := SiteInitScript(apexParams())
+	if err != nil {
+		t.Fatalf("SiteInitScript: %v", err)
+	}
+	for _, want := range []string{
+		"https://example.com {",
+		"root * /var/www/example.com",
+		"https://www.example.com {",
+		"redir https://example.com{uri} permanent",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("apex script missing %q\n---\n%s", want, script)
+		}
+	}
+}
+
+func TestSiteInitScriptApexNormalizesWWW(t *testing.T) {
+	// A base_url that already carries www should still serve the bare apex and
+	// redirect www → apex (not serve www and redirect apex → www).
+	p := apexParams()
+	p.Target.BaseURL = "https://www.example.com"
+	script, err := SiteInitScript(p)
+	if err != nil {
+		t.Fatalf("SiteInitScript: %v", err)
+	}
+	if !strings.Contains(script, "https://example.com {\n\troot * /var/www/example.com") {
+		t.Fatalf("www base_url should serve the bare apex\n%s", script)
+	}
+	if !strings.Contains(script, "https://www.example.com {\n\tredir https://example.com{uri} permanent") {
+		t.Fatalf("www base_url should redirect www → apex\n%s", script)
+	}
+}
+
+func TestSiteInitScriptApexNoWWW(t *testing.T) {
+	p := apexParams()
+	p.NoWWW = true
+	script, err := SiteInitScript(p)
+	if err != nil {
+		t.Fatalf("SiteInitScript: %v", err)
+	}
+	if strings.Contains(script, "redir") || strings.Contains(script, "www.example.com") {
+		t.Fatalf("--no-www must omit the redirect block\n%s", script)
+	}
+	if !strings.Contains(script, "https://example.com {") {
+		t.Fatalf("apex still served with --no-www\n%s", script)
+	}
+}
+
+func TestSiteInitScriptDomainModeOverride(t *testing.T) {
+	// Force apex on a subdomain host: redirect appears.
+	p := staticParams()
+	p.DomainMode = "apex"
+	script, err := SiteInitScript(p)
+	if err != nil {
+		t.Fatalf("apex override: %v", err)
+	}
+	if !strings.Contains(script, "redir") {
+		t.Fatalf("--apex override should add a www redirect\n%s", script)
+	}
+
+	// Force subdomain on an apex host: no redirect.
+	p = apexParams()
+	p.DomainMode = "subdomain"
+	script, err = SiteInitScript(p)
+	if err != nil {
+		t.Fatalf("subdomain override: %v", err)
+	}
+	if strings.Contains(script, "redir") {
+		t.Fatalf("--subdomain override should suppress the www redirect\n%s", script)
+	}
+}
+
+func TestIsApexDomain(t *testing.T) {
+	tests := map[string]bool{
+		"example.com":          true,
+		"EXAMPLE.com":          true,
+		"www.example.com":      true,
+		"example.co.uk":        true,  // multi-label TLD apex
+		"blog.example.com":     false, // subdomain
+		"blog.example.co.uk":   false, // subdomain under a multi-label TLD
+		"www.blog.example.com": false, // www in front of a subdomain
+		"localhost":            false,
+		"":                     false,
+	}
+	for host, want := range tests {
+		if got := isApexDomain(host); got != want {
+			t.Errorf("isApexDomain(%q) = %v, want %v", host, got, want)
+		}
 	}
 }
 

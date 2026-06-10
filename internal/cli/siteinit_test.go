@@ -63,6 +63,47 @@ func TestSiteInitCommandFlagsThreaded(t *testing.T) {
 	}
 }
 
+func TestSiteInitCommandDomainFlagsThreaded(t *testing.T) {
+	_, _, err := runSiteInitCommand(t, []string{"site-init", "--apex", "--no-www"},
+		func(_ context.Context, _ rootOptions, p siteInitParams) (siteInitOutcome, error) {
+			if p.domainMode != "apex" {
+				t.Fatalf("--apex not threaded: %#v", p)
+			}
+			if !p.noWWW {
+				t.Fatal("--no-www not threaded")
+			}
+			return siteInitOutcome{script: "x"}, nil
+		})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	_, _, err = runSiteInitCommand(t, []string{"site-init", "--subdomain"},
+		func(_ context.Context, _ rootOptions, p siteInitParams) (siteInitOutcome, error) {
+			if p.domainMode != "subdomain" {
+				t.Fatalf("--subdomain not threaded: %#v", p)
+			}
+			return siteInitOutcome{script: "x"}, nil
+		})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
+
+func TestSiteInitCommandApexSubdomainConflict(t *testing.T) {
+	_, _, err := runSiteInitCommand(t, []string{"site-init", "--apex", "--subdomain"},
+		func(context.Context, rootOptions, siteInitParams) (siteInitOutcome, error) {
+			t.Fatal("run should not be called when flags conflict")
+			return siteInitOutcome{}, nil
+		})
+	if err == nil {
+		t.Fatal("conflicting --apex/--subdomain err = nil, want usage error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v, want mutual-exclusion message", err)
+	}
+}
+
 func TestSiteInitCommandApplied(t *testing.T) {
 	stdout, stderr, err := runSiteInitCommand(t, []string{"site-init", "--apply", "--as-admin", "root"},
 		func(_ context.Context, _ rootOptions, p siteInitParams) (siteInitOutcome, error) {
@@ -161,7 +202,7 @@ func TestDefaultSiteInitRunGeneratesScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultSiteInitRun: %v", err)
 	}
-	if !strings.Contains(outcome.script, "travel.example.com {") {
+	if !strings.Contains(outcome.script, "blog.example.com {") {
 		t.Fatalf("script missing caddy block:\n%s", outcome.script)
 	}
 	if strings.Contains(outcome.script, "@mason_private") {
@@ -179,10 +220,10 @@ func TestDefaultSiteInitRunMissingRoot(t *testing.T) {
 	cfg := "default: home\n" +
 		"targets:\n" +
 		"  home:\n" +
-		"    host: travel.example.com\n" +
+		"    host: vps.example.net\n" +
 		"    user: mason\n" +
-		"    root: /var/www/travel.example.com\n" +
-		"    base_url: https://travel.example.com\n"
+		"    root: /var/www/blog.example.com\n" +
+		"    base_url: https://blog.example.com\n"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -202,13 +243,13 @@ func writeStaticConfig(t *testing.T) string {
 	cfg := "default: home\n" +
 		"targets:\n" +
 		"  home:\n" +
-		"    host: travel.example.com\n" +
+		"    host: vps.example.net\n" +
 		"    user: mason\n" +
-		"    root: /var/www/travel.example.com\n" +
-		"    base_url: https://travel.example.com\n" +
+		"    root: /var/www/blog.example.com\n" +
+		"    base_url: https://blog.example.com\n" +
 		"    deploy:\n" +
 		"      build_dir: .\n" +
-		"      remote_path: /var/www/travel.example.com\n"
+		"      remote_path: /var/www/blog.example.com\n"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}

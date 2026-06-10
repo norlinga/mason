@@ -239,7 +239,23 @@ func checkCaddy(ctx context.Context, runner remote.CommandRunner, target config.
 	} else {
 		rootCheck = warn(rootCheck, fmt.Sprintf("root %q not served by Caddy", target.Root))
 	}
-	return []DoctorCheck{hostCheck, rootCheck}
+	checks := []DoctorCheck{hostCheck, rootCheck}
+
+	// For an apex domain, site-init also provisions a www→apex redirect. Confirm Caddy
+	// serves the www name (which requires a www DNS record so Caddy can get its cert).
+	if isApexDomain(host) {
+		wwwHost := "www." + strings.TrimPrefix(strings.ToLower(host), "www.")
+		wwwCheck := DoctorCheck{Name: "caddy redirects www"}
+		if contains(hosts, wwwHost) {
+			wwwCheck = ok(wwwCheck, wwwHost+" → apex")
+		} else {
+			wwwCheck = warn(wwwCheck, fmt.Sprintf(
+				"%s not served by Caddy; run 'mason site-init' to add the www→apex redirect, and add a www DNS record so Caddy can issue its certificate",
+				wwwHost))
+		}
+		checks = append(checks, wwwCheck)
+	}
+	return checks
 }
 
 // caddyHostsAndRoots walks a decoded Caddy JSON config collecting every host matcher

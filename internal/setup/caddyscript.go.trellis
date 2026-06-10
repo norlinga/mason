@@ -4,12 +4,14 @@
 @reviewed: 2026-06-10
 
 Feature: Shared Caddy Script Fragments
-  "Reusable POSIX-sh fragments and helpers for the Caddy-touching bootstrap scripts (remote-init, site-init): Caddy group access, the single idempotent Caddyfile import, the validate-gated reload, plus base_url/site-address and shell-quoting helpers."
+  "Reusable POSIX-sh fragments and helpers for the Caddy-touching bootstrap scripts (remote-init, site-init): Caddy group access, the single idempotent Caddyfile import, the validate-gated reload, plus base_url/site-address, apex-domain detection (Public Suffix List), and shell-quoting helpers."
 
   Provides:
     - setup.shellQuote @source("symbol:shellQuote")
     - setup.siteAddressFromBaseURL @source("symbol:siteAddressFromBaseURL")
     - setup.hostOnly @source("symbol:hostOnly")
+    - setup.splitSiteScheme @source("symbol:splitSiteScheme")
+    - setup.isApexDomain @source("symbol:isApexDomain")
     - setup.writeCaddyGroupAccessBlock @source("symbol:writeCaddyGroupAccessBlock")
     - setup.writeCaddyImportBlock @source("symbol:writeCaddyImportBlock")
     - setup.writeCaddyReloadBlock @source("symbol:writeCaddyReloadBlock")
@@ -17,6 +19,7 @@ Feature: Shared Caddy Script Fragments
   Invariants:
     - shellQuote MUST single-quote arbitrary values safely, including embedded single quotes
     - siteAddressFromBaseURL MUST reduce a base_url to scheme://host, dropping any path, and MUST error on empty or hostless input
+    - isApexDomain MUST use the Public Suffix List so multi-label TLDs (.co.uk, .com.au) classify correctly, MUST treat a leading "www." as the apex it fronts, and MUST report false for subdomains and non-domains
     - writeCaddyImportBlock MUST be idempotent (grep -qF guarded) and append-only — it MUST never rewrite the main Caddyfile beyond the single import line
     - writeCaddyReloadBlock MUST gate any apply on `caddy validate`, and MUST restart (not reload) when CADDY_GROUP_CHANGED is set so a new supplementary group is picked up
     - writeCaddyReloadBlock with reload=false MUST emit only the manual steps, never an active apply
@@ -42,3 +45,8 @@ Feature: Shared Caddy Script Fragments
     Given an empty or hostless base_url
     When siteAddressFromBaseURL runs
     Then it returns an error and no site address
+
+  Scenario (edge): Multi-label TLD apex
+    Given hosts example.com, www.example.com, and example.co.uk
+    When isApexDomain runs
+    Then all are apex, while blog.example.com and blog.example.co.uk are not

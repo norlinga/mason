@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // Defaults shared by the Caddy-touching bootstrap scripts (remote-init, site-init).
@@ -82,6 +84,33 @@ func hostOnly(siteAddress string) string {
 		return host
 	}
 	return siteAddress
+}
+
+// splitSiteScheme splits a site address into its scheme prefix ("https://" or "")
+// and the bare host, so callers can rebuild related addresses (e.g. the www variant)
+// while preserving the original scheme.
+func splitSiteScheme(siteAddress string) (prefix, host string) {
+	if s, h, ok := strings.Cut(siteAddress, "://"); ok {
+		return s + "://", h
+	}
+	return "", siteAddress
+}
+
+// isApexDomain reports whether host is a registrable apex domain (example.com,
+// example.co.uk) rather than a subdomain (blog.example.com). A leading
+// "www." is treated as the apex it fronts, so www.example.com classifies as apex. It
+// uses the Public Suffix List, so multi-label TLDs (.co.uk, .com.au) are handled
+// correctly — naive label counting would misread example.co.uk as a subdomain.
+func isApexDomain(host string) bool {
+	h := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(host)), "www.")
+	if h == "" || !strings.Contains(h, ".") {
+		return false
+	}
+	etld1, err := publicsuffix.EffectiveTLDPlusOne(h)
+	if err != nil {
+		return false
+	}
+	return etld1 == h
 }
 
 // shellQuote single-quotes a value for safe embedding in a generated script.

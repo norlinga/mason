@@ -23,6 +23,8 @@ type siteInitParams struct {
 	host       string
 	root       string
 	spa        bool
+	domainMode string
+	noWWW      bool
 	caddyUser  string
 	group      string
 	caddyfile  string
@@ -44,14 +46,17 @@ type siteInitJSON struct {
 
 func newSiteInitCommand(stdout, stderr io.Writer, run siteInitRunFunc) *cobra.Command {
 	p := siteInitParams{reload: true}
-	var noReload bool
+	var noReload, apexFlag, subdomainFlag bool
 	cmd := &cobra.Command{
 		Use:   "site-init",
 		Short: "Emit (or apply) an idempotent static-host provisioning script",
-		Long: "Generate an idempotent, inspectable script that stands up a plain static\n" +
-			"subdomain for the target: a mason-owned, group-readable web root, Caddy read\n" +
-			"access, and a Mason-owned static Caddy snippet imported once. Printed by default\n" +
-			"so you can review it; use --apply --as-admin <user> to run it over SSH as an admin.\n\n" +
+		Long: "Generate an idempotent, inspectable script that stands up a static site for the\n" +
+			"target: a mason-owned, group-readable web root, Caddy read access, and a Mason-owned\n" +
+			"static Caddy snippet imported once. Printed by default so you can review it; use\n" +
+			"--apply --as-admin <user> to run it over SSH as an admin.\n\n" +
+			"Apex domains (example.com) vs subdomains (blog.example.com) are auto-detected: an apex is\n" +
+			"served from the bare domain with a permanent www→apex redirect; a subdomain is served\n" +
+			"as-is. Override with --apex/--subdomain, or drop the redirect with --no-www.\n\n" +
 			"Prerequisite: 'mason remote-init' (or equivalent) has already run on the host, so\n" +
 			"the mason user, deploy key, and Caddyfile import discipline exist. site-init creates\n" +
 			"no users, keys, or share scaffolding.",
@@ -60,6 +65,16 @@ func newSiteInitCommand(stdout, stderr io.Writer, run siteInitRunFunc) *cobra.Co
 			root := rootOptionsFromCommand(cmd)
 			opts := outputOptions(root)
 			p.reload = !noReload
+			if apexFlag && subdomainFlag {
+				return emitError(stdout, stderr, opts,
+					output.NewError(output.CodeUsage, "--apex and --subdomain are mutually exclusive", nil))
+			}
+			switch {
+			case apexFlag:
+				p.domainMode = "apex"
+			case subdomainFlag:
+				p.domainMode = "subdomain"
+			}
 			outcome, err := run(cmd.Context(), root, p)
 			if err != nil {
 				// A failed --apply still captured the script's remote output; that is
@@ -82,6 +97,9 @@ func newSiteInitCommand(stdout, stderr io.Writer, run siteInitRunFunc) *cobra.Co
 	flags.StringVar(&p.host, "host", "", "override the site host (default: host from target base_url)")
 	flags.StringVar(&p.root, "root", "", "override the web root (default: deploy.remote_path)")
 	flags.BoolVar(&p.spa, "spa", false, "add a try_files fallback to /index.html for SPA builds")
+	flags.BoolVar(&apexFlag, "apex", false, "treat the host as an apex domain (serve apex + redirect www→apex)")
+	flags.BoolVar(&subdomainFlag, "subdomain", false, "treat the host as a subdomain (no www redirect)")
+	flags.BoolVar(&p.noWWW, "no-www", false, "for apex domains, omit the www→apex redirect block")
 	flags.StringVar(&p.caddyUser, "caddy-user", "", "Caddy's system user (default \"caddy\")")
 	flags.StringVar(&p.group, "group", "", "service group (default = remote user)")
 	flags.StringVar(&p.caddyfile, "caddyfile", "", "main Caddyfile path (default /etc/caddy/Caddyfile)")
@@ -135,6 +153,8 @@ func defaultSiteInitRun(ctx context.Context, root rootOptions, p siteInitParams)
 		Host:       p.host,
 		Root:       p.root,
 		SPA:        p.spa,
+		DomainMode: p.domainMode,
+		NoWWW:      p.noWWW,
 		CaddyUser:  p.caddyUser,
 		Group:      p.group,
 		Caddyfile:  p.caddyfile,

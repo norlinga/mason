@@ -240,6 +240,44 @@ func TestDiagnoseCaddyRootMismatchWarns(t *testing.T) {
 	}
 }
 
+func TestDiagnoseApexMissingWWWWarns(t *testing.T) {
+	// An apex target whose Caddy config serves only the bare apex (no www) should
+	// warn that the www→apex redirect is missing, but stay healthy.
+	apex := target()
+	apex.BaseURL = "https://example.com"
+	apex.Root = "/srv/site"
+	apexOnly := `{"x":{"host":["example.com"]},"y":{"root":"/srv/site"}}`
+	deps := DoctorDeps{Runner: healthyRunner(apexOnly), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, apex)
+	if s, ok := statusByName(report, "caddy redirects www"); !ok || s != CheckWarn {
+		t.Fatalf("www check = %q (found=%v), want warn", s, ok)
+	}
+	if !report.Healthy() {
+		t.Fatalf("missing www redirect must not fail the report: %+v", report.Checks)
+	}
+}
+
+func TestDiagnoseApexWithWWWOK(t *testing.T) {
+	apex := target()
+	apex.BaseURL = "https://example.com"
+	apex.Root = "/srv/site"
+	withWWW := `{"x":{"host":["example.com","www.example.com"]},"y":{"root":"/srv/site"}}`
+	deps := DoctorDeps{Runner: healthyRunner(withWWW), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, apex)
+	if s, ok := statusByName(report, "caddy redirects www"); !ok || s != CheckOK {
+		t.Fatalf("www check = %q (found=%v), want ok", s, ok)
+	}
+}
+
+func TestDiagnoseSubdomainHasNoWWWCheck(t *testing.T) {
+	// The default subdomain target must not emit the apex-only www check.
+	deps := DoctorDeps{Runner: healthyRunner(caddyConfigJSON), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, target())
+	if _, ok := statusByName(report, "caddy redirects www"); ok {
+		t.Fatal("subdomain target should not produce a www-redirect check")
+	}
+}
+
 func TestDiagnoseDeployTreeProbedWhenSet(t *testing.T) {
 	tg := target()
 	tg.Deploy.RemotePath = "/srv/site"

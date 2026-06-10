@@ -30,6 +30,7 @@ Feature: Target Diagnostics
     - An empty manifest or no enabled endpoints MUST warn and skip the symlink probe, not fail
     - When manifest fetch fails, the symlink probe MUST warn as skipped rather than misreport
     - Caddy reconcile via the admin API MUST be best-effort: unreachable API yields warn on both host and root checks
+    - For an apex-domain target, Caddy reconcile MUST additionally check the www→apex redirect host and warn (not fail) when it is absent
     - Remote rsync availability MUST be verified on the server
 
   OutOfScope:
@@ -62,3 +63,8 @@ Feature: Target Diagnostics
     Given SSH works but localhost:2019 is unreachable
     When Diagnose runs
     Then both Caddy checks warn and DoctorReport.Healthy remains true
+
+  Scenario (edge): Apex domain missing www redirect
+    Given an apex-domain target whose Caddy config has no www host
+    When Diagnose runs
+    Then a www-redirect check warns with site-init and www-DNS guidance while the report stays healthy

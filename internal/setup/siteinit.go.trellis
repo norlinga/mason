@@ -4,7 +4,7 @@
 @reviewed: 2026-06-10
 
 Feature: Static Host Provisioning Script Generator
-  "Renders the idempotent provisioning script for a plain static subdomain: a mason-owned, group-readable web root, Caddy group access, and a Mason-owned static Caddy snippet imported once. No share scaffolding, no user/key creation."
+  "Renders the idempotent provisioning script for a static site (apex domain or subdomain): a mason-owned, group-readable web root, Caddy group access, and a Mason-owned static Caddy snippet imported once. Apex domains also get a www→apex redirect. No share scaffolding, no user/key creation."
 
   Provides:
     - setup.SiteInitParams @source("symbol:SiteInitParams")
@@ -19,7 +19,10 @@ Feature: Static Host Provisioning Script Generator
   Invariants:
     - SiteInitScript MUST be a deterministic, pure function of its params (same input, same script)
     - The script MUST be idempotent for the web root, the snippet file, and the Caddyfile import line
-    - The Caddy snippet MUST be a plain static vhost and MUST NOT include /objects/* or /.mason/* matchers
+    - The Caddy snippet MUST be a static file_server vhost and MUST NOT include /objects/* or /.mason/* matchers
+    - Apex vs subdomain MUST be auto-detected via the Public Suffix List, overridable by DomainMode ("apex"/"subdomain")
+    - An apex domain MUST be served from the bare apex and (unless NoWWW) MUST add a permanent www→apex redirect; a www-prefixed base_url MUST normalize to the same apex result
+    - A subdomain MUST be served verbatim with no www redirect block
     - The script MUST NOT create users, groups, or SSH keys, and MUST assume the mason service user already exists
     - The script MUST NOT emit share-tree scaffolding (objects/, s/, .mason/)
     - The web root MUST be group-readable (2750, mason-owned) so Caddy can serve it
@@ -38,6 +41,11 @@ Feature: Static Host Provisioning Script Generator
     Given a target with a base_url and deploy.remote_path
     When SiteInitScript renders
     Then it creates the web root, grants Caddy group access, writes a plain static snippet, and imports it once
+
+  Scenario (happy-path): Apex domain with www redirect
+    Given an apex base_url (example.com or www.example.com)
+    When SiteInitScript renders
+    Then it serves the bare apex and adds a permanent www.example.com → apex redirect block
 
   Scenario (edge): SPA fallback
     Given SPA is true

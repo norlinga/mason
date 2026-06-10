@@ -22,7 +22,13 @@ type SiteInitParams struct {
 	// Root overrides the web root derived from the target's deploy.remote_path.
 	Root string
 	// SPA appends a try_files fallback to index.html for single-page-app builds.
-	SPA        bool
+	SPA bool
+	// DomainMode forces apex/subdomain handling: "apex", "subdomain", or "" to
+	// auto-detect via the Public Suffix List. Apex domains get a www→apex redirect
+	// and are served from the bare apex; subdomains are served as-is.
+	DomainMode string
+	// NoWWW suppresses the www→apex redirect block for apex domains.
+	NoWWW      bool
 	CaddyUser  string
 	Group      string
 	Caddyfile  string
@@ -30,6 +36,12 @@ type SiteInitParams struct {
 	// Reload appends `caddy validate` + reload/restart to the script.
 	Reload bool
 }
+
+// Domain modes for SiteInitParams.DomainMode.
+const (
+	domainModeApex      = "apex"
+	domainModeSubdomain = "subdomain"
+)
 
 // SiteInitScript renders an idempotent POSIX-sh script that stands up a plain static
 // subdomain: the web root (mason-owned, group-readable for Caddy), Caddy group access,
@@ -106,7 +118,7 @@ func SiteInitScript(p SiteInitParams) (string, error) {
 	b.WriteString("# 3. Caddy: Mason-owned snippet + single import (never rewrites your Caddyfile)\n")
 	b.WriteString("install -d -m 755 \"$SNIPPET_DIR\"\n")
 	fmt.Fprintf(&b, "cat > %s <<'CADDY'\n", shellQuote(snippetFile))
-	b.WriteString(caddyStaticSnippet(siteAddress, siteRoot, p.SPA))
+	b.WriteString(staticSnippetFor(siteAddress, siteRoot, p))
 	b.WriteString("CADDY\n")
 	writeCaddyImportBlock(&b, snippetGlob)
 	b.WriteString("\n")
@@ -116,17 +128,72 @@ func SiteInitScript(p SiteInitParams) (string, error) {
 	return b.String(), nil
 }
 
+// staticSnippet describes the static vhost(s) to render.
+type staticSnippet struct {
+	serveAddress string // canonical address that serves the files (scheme+host)
+	root         string
+	spa          bool
+	// wwwRedirect, when set, appends a second block redirecting wwwAddress to
+	// redirectTarget (used for apex domains: www.example.com → https://example.com).
+	wwwRedirect    bool
+	wwwAddress     string
+	redirectTarget string
+}
+
+// staticSnippetFor resolves apex-vs-subdomain handling from the params and renders the
+// Caddy snippet. Apex domains are served from the bare apex and (unless NoWWW) get a
+// permanent www→apex redirect; subdomains are served verbatim, exactly as before.
+func staticSnippetFor(siteAddress, root string, p SiteInitParams) string {
+	prefix, host := splitSiteScheme(siteAddress)
+
+	apex := isApexDomain(host)
+	switch strings.ToLower(strings.TrimSpace(p.DomainMode)) {
+	case domainModeApex:
+		apex = true
+	case domainModeSubdomain:
+		apex = false
+	}
+
+	if !apex {
+		return caddyStaticSnippet(staticSnippet{serveAddress: siteAddress, root: root, spa: p.SPA})
+	}
+
+	// Normalize to the bare apex so a base_url of www.example.com still serves example.com
+	// and redirects www → apex. The redirect target is always an absolute https URL
+	// (apex domains imply automatic TLS).
+	apexHost := strings.TrimPrefix(strings.ToLower(host), "www.")
+	redirectScheme := prefix
+	if redirectScheme == "" {
+		redirectScheme = "https://"
+	}
+	return caddyStaticSnippet(staticSnippet{
+		serveAddress:   prefix + apexHost,
+		root:           root,
+		spa:            p.SPA,
+		wwwRedirect:    !p.NoWWW,
+		wwwAddress:     prefix + "www." + apexHost,
+		redirectTarget: redirectScheme + apexHost,
+	})
+}
+
 // caddyStaticSnippet renders a plain static vhost: serve the root with file_server.
 // Unlike caddyShareSnippet there is no /objects/* or /.mason/* 404 matcher. With spa,
-// requests that miss a file fall back to /index.html for client-side routing.
-func caddyStaticSnippet(siteAddress, root string, spa bool) string {
+// requests that miss a file fall back to /index.html for client-side routing. For an
+// apex domain it also emits a permanent www→apex redirect block so both names work.
+func caddyStaticSnippet(s staticSnippet) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s {\n", siteAddress)
-	fmt.Fprintf(&b, "\troot * %s\n", root)
-	if spa {
+	fmt.Fprintf(&b, "%s {\n", s.serveAddress)
+	fmt.Fprintf(&b, "\troot * %s\n", s.root)
+	if s.spa {
 		b.WriteString("\ttry_files {path} /index.html\n")
 	}
 	b.WriteString("\tfile_server\n")
 	b.WriteString("}\n")
+	if s.wwwRedirect {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "%s {\n", s.wwwAddress)
+		fmt.Fprintf(&b, "\tredir %s{uri} permanent\n", s.redirectTarget)
+		b.WriteString("}\n")
+	}
 	return b.String()
 }

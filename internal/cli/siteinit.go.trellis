@@ -23,6 +23,7 @@ Feature: Site Init Command
     - Quiet mode MUST suppress stderr hints while still emitting the script artifact
     - JSON output MUST use the stable siteInitJSON shape under output.Success
     - --host and --root MUST override the target-derived site address and web root
+    - --apex and --subdomain MUST be mutually exclusive and MUST fail with a usage error when both are set
     - A missing web root (no deploy.remote_path and no --root) MUST fail with a clear error
 
   OutOfScope:
@@ -39,6 +40,11 @@ Feature: Site Init Command
     Given --apply --as-admin root
     When the script succeeds over SSH
     Then remote output is echoed and an applied confirmation is printed
+
+  Scenario (negative): Conflicting domain mode
+    Given both --apex and --subdomain
+    When the command runs
+    Then it fails with a usage error and never invokes the run func
 
   Scenario (negative): Apply without admin
     Given --apply with no --as-admin
