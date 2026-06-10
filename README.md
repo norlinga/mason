@@ -91,14 +91,14 @@ mason deploy [target]      # rsync the build tree; plan → progress → summary
 mason deploy --delete      # also remove remote files absent locally (confirmed)
 ```
 
-### Provisioning a static subdomain
+### Provisioning a static site
 
-`deploy` is pure rsync — it never touches Caddy. To stand up a brand-new **plain
-static** subdomain (no share object store), `site-init` provisions the serving side
-first. Like `remote-init`, it prints an idempotent script by default; `--apply` runs
-it over SSH as an admin. It creates the web root (mason-owned, group-readable for
-Caddy), grants Caddy read access, and adds a Mason-owned static Caddy vhost imported
-once — no users, keys, or share scaffolding.
+`deploy` is pure rsync — it never touches Caddy. To stand up a brand-new **static
+site** (no share object store), `site-init` provisions the serving side first. Like
+`remote-init`, it prints an idempotent script by default; `--apply` runs it over SSH
+as an admin. It creates the web root (mason-owned, group-readable for Caddy), grants
+Caddy read access, and adds a Mason-owned static Caddy vhost imported once — no users,
+keys, or share scaffolding.
 
 ```sh
 mason site-init -t home                       # review the script
@@ -108,8 +108,21 @@ mason deploy                                  # rsync the build into the new roo
 mason site-init -t home --spa                 # SPA build: try_files → /index.html
 ```
 
+**Apex domains vs subdomains** are auto-detected (via the Public Suffix List, so
+`example.co.uk` is handled correctly):
+
+- A **subdomain** (`blog.example.com`) gets a single plain `file_server` vhost.
+- An **apex domain** (`example.com`) is served from the bare domain *and* gets a
+  permanent `www.example.com` → `example.com` redirect, so both names work.
+
+Override the guess with `--apex` / `--subdomain`, or drop the redirect with `--no-www`.
 Host and root are derived from the target's `base_url` and `deploy.remote_path`;
 override with `--host` / `--root` for ad-hoc use before a `.mason` exists.
+
+Caddy provisions TLS automatically for every name it serves — no extra config. For an
+apex domain that means **both `example.com` and `www.example.com` need an A/AAAA record
+pointing at the VPS**, so Caddy can issue a certificate for each. (`mason doctor` warns
+if the `www` redirect is missing from Caddy's config.)
 
 **Prerequisite:** `mason remote-init` has already run on the host, so the `mason`
 user, deploy key, and Caddyfile import discipline exist.

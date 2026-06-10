@@ -218,26 +218,37 @@ When nothing changed:
 | `mason setup` | Local onboarding wizard: ensure an SSH key exists, write/validate config, test connectivity. |
 | `mason doctor` | Diagnostics: SSH reachability, remote directory permissions, symlink serving, Caddy root sanity. |
 | `mason remote-init` | One-time server bootstrap: create the store layout, configure the deploy user, print/install the Caddy snippet. |
-| `mason site-init` | Provision a plain static subdomain: web root, Caddy read access, and a Mason-owned static Caddy vhost imported once. No share store. |
+| `mason site-init` | Provision a static site (apex domain or subdomain): web root, Caddy read access, and a Mason-owned static Caddy vhost imported once. Apex domains also get a www→apex redirect. No share store. |
 | `mason target ls\|add\|use\|rm` | Manage named targets without hand-editing config. |
 
 ---
 
 ## Static site provisioning (`site-init`)
 
-`mason site-init` stands up a **plain static subdomain** — no share object store —
-following the same print-or-apply model as `remote-init`. It emits an idempotent,
-inspectable POSIX `sh` script by default; pass `--apply --as-admin <user>` to run it
-over SSH as an admin. The script:
+`mason site-init` stands up a **static site** — no share object store — following the
+same print-or-apply model as `remote-init`. It emits an idempotent, inspectable POSIX
+`sh` script by default; pass `--apply --as-admin <user>` to run it over SSH as an admin.
+The script:
 
 - creates the static web root (`2750`, mason-owned, group-readable for Caddy),
 - adds Caddy to the mason group so it can read the tree,
-- writes a plain static Caddy snippet to `/etc/caddy/mason.d/{target}.caddy`,
+- writes a static Caddy snippet to `/etc/caddy/mason.d/{target}.caddy`,
 - ensures the main Caddyfile imports `mason.d/*.caddy` exactly once,
 - `caddy validate`s, then reloads (or restarts when group membership changed).
 
 It creates **no** users, keys, or share scaffolding (`objects/`, `s/`, `.mason/`),
 and the snippet carries **no** private-prefix 404 matcher.
+
+**Apex domains vs subdomains** are auto-detected via the Public Suffix List (so
+multi-label TLDs like `.co.uk` classify correctly):
+
+- **Subdomain** (`blog.example.com`) → one plain `file_server` vhost.
+- **Apex domain** (`example.com`) → served from the bare apex, plus a permanent
+  `www.example.com` → `example.com` redirect block so both names resolve.
+
+Caddy issues TLS automatically for every name it serves, so an apex domain needs **A/AAAA
+records for both the apex and `www`** pointing at the VPS. `mason doctor` warns when an
+apex target's `www` redirect is absent from Caddy's config.
 
 **Prerequisite:** `mason remote-init` (or equivalent) has already run on the host, so
 the `mason` user, deploy key, and Caddyfile import discipline exist.
@@ -255,9 +266,11 @@ mason site-init --host newsite.example.com --root /var/www/newsite --apply --as-
 mason site-init -t home --spa
 ```
 
-Flags of note: `--host` / `--root` override the values derived from the target's
-`base_url` / `deploy.remote_path`; `--spa` adds a `try_files {path} /index.html`
-fallback; `--no-reload` prints the manual validate/reload steps instead of running them.
+Flags of note: `--apex` / `--subdomain` force the domain handling when auto-detection
+isn't what you want; `--no-www` omits the apex www→apex redirect; `--host` / `--root`
+override the values derived from the target's `base_url` / `deploy.remote_path`; `--spa`
+adds a `try_files {path} /index.html` fallback; `--no-reload` prints the manual
+validate/reload steps instead of running them.
 
 ---
 
