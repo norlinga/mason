@@ -1,0 +1,64 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-06-10
+
+Feature: Target Diagnostics
+  "Read-only diagnostics for a Mason target: SSH reachability, remote permissions, manifest access, HTTP privacy probes, symlink serving, and Caddy reconcile."
+
+  Provides:
+    - setup.Diagnose @source("symbol:Diagnose")
+    - setup.DoctorDeps @source("symbol:DoctorDeps")
+    - setup.DoctorReport @source("symbol:DoctorReport")
+    - setup.DoctorCheck @source("symbol:DoctorCheck")
+    - setup.CheckStatus @source("symbol:CheckStatus")
+
+  Consumes:
+    - config.Target
+    - remote.CommandRunner
+    - remote.ManifestStore
+    - domain.Manifest
+    - domain.ObjectURL
+    - domain.SlugURL
+
+  Invariants:
+    - Diagnose MUST stay read-only and never mutate remote state
+    - Probe failures MUST become fail or warn checks, not returned errors
+    - DoctorReport.Healthy MUST tolerate warnings and fail only when a check status is fail
+    - HTTP probes MUST verify /.mason/manifest.json and /objects/ are not publicly reachable (200)
+    - Symlink serving MUST GET a manifest-backed slug or object-path URL and fail on non-2xx
+    - An empty manifest or no enabled endpoints MUST warn and skip the symlink probe, not fail
+    - When manifest fetch fails, the symlink probe MUST warn as skipped rather than misreport
+    - Caddy reconcile via the admin API MUST be best-effort: unreachable API yields warn on both host and root checks
+    - Remote rsync availability MUST be verified on the server
+
+  OutOfScope:
+    - Local onboarding and config writes (setup.Run)
+    - Remote bootstrap script generation (RemoteInitScript)
+    - Unmanifested symlink drift detection and blob orphan audits
+    - Multi-target config editing (target subcommands, M-073)
+
+  Scenario (happy-path): Healthy target
+    Given SSH, writable trees, a readable manifest with an enabled endpoint, private prefixes, and matching Caddy config
+    When Diagnose runs
+    Then every critical check is ok and DoctorReport.Healthy is true
+
+  Scenario (happy-path): Fresh empty manifest
+    Given a reachable server with an empty manifest and no shares yet
+    When Diagnose runs
+    Then manifest is ok and symlink serving warns with no enabled endpoints while the report stays healthy
+
+  Scenario (negative): Public manifest leak
+    Given HTTP GET on /.mason/manifest.json returns 200
+    When Diagnose runs
+    Then the private-prefix check fails and DoctorReport.Healthy is false
+
+  Scenario (negative): Symlink not served
+    Given a manifest with an enabled slug and HTTP GET on that URL returns 404
+    When Diagnose runs
+    Then symlink serving fails and DoctorReport.Healthy is false
+
+  Scenario (edge): Caddy admin unavailable
+    Given SSH works but localhost:2019 is unreachable
+    When Diagnose runs
+    Then both Caddy checks warn and DoctorReport.Healthy remains true

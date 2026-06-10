@@ -1,0 +1,51 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-06-10
+
+Feature: Doctor Command
+  "CLI handler for mason doctor: run read-only target diagnostics and exit non-zero when a check fails."
+
+  Provides:
+    - cli.newDoctorCommand @source("symbol:newDoctorCommand")
+    - cli.defaultDoctorRun @source("symbol:defaultDoctorRun")
+
+  Consumes:
+    - setup.Diagnose
+    - setup.DoctorDeps
+    - remote.SSHOptionsFromTarget
+    - remote.NewSSH
+    - remote.NewSSHFS
+    - remote.NewRemoteManifestStore
+    - output.WriteJSON
+
+  Invariants:
+    - The command MUST render the full report before exiting non-zero on failed checks
+    - Warnings MUST exit zero; only fail status drives a non-zero exit
+    - JSON output MUST use the stable doctorReportJSON shape under output.Success
+    - Plain output MUST render a CHECK | STATUS | DETAIL table
+    - defaultDoctorRun MUST wire SSH, manifest store, and HTTP probes without mutating remote state
+
+  OutOfScope:
+    - Diagnostic logic and check semantics (owned by setup.Diagnose)
+    - Local onboarding and remote bootstrap commands
+
+  Scenario (happy-path): Plain healthy report
+    Given a healthy DoctorReport
+    When mason doctor runs
+    Then stdout shows the diagnostic table and the exit code is zero
+
+  Scenario (happy-path): JSON healthy report
+    Given --json and a healthy DoctorReport
+    When mason doctor runs
+    Then stdout is a success envelope with healthy true and the check list
+
+  Scenario (negative): Failed check
+    Given a report with at least one fail check
+    When mason doctor runs
+    Then the report is rendered and the exit code is non-zero without printing errDoctorUnhealthy
+
+  Scenario (negative): Resolve target failure
+    Given defaultDoctorRun cannot resolve a target
+    When mason doctor runs
+    Then emitError renders the failure and the exit code is non-zero

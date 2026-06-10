@@ -158,18 +158,13 @@ func Run(ctx context.Context, deps Deps, params Params) (Result, error) {
 	return result, nil
 }
 
-// BuildConfig assembles a single-target config from input, applying defaults, and
-// validates it.
-func BuildConfig(in Input) (*config.Config, error) {
-	name := strings.TrimSpace(in.TargetName)
-	if name == "" {
-		name = defaultTargetName
-	}
+// BuildTarget assembles a config.Target from input, applying defaults (user → mason).
+// It does not validate on its own; callers validate via the enclosing config.
+func BuildTarget(in Input) config.Target {
 	user := strings.TrimSpace(in.User)
 	if user == "" {
 		user = defaultUser
 	}
-
 	target := config.Target{
 		Host:    strings.TrimSpace(in.Host),
 		User:    user,
@@ -181,10 +176,19 @@ func BuildConfig(in Input) (*config.Config, error) {
 	target.Share.DefaultPath = strings.TrimSpace(in.DefaultPath)
 	target.Deploy.BuildDir = strings.TrimSpace(in.BuildDir)
 	target.Deploy.RemotePath = strings.TrimSpace(in.RemotePath)
+	return target
+}
 
+// BuildConfig assembles a single-target config from input, applying defaults, and
+// validates it.
+func BuildConfig(in Input) (*config.Config, error) {
+	name := strings.TrimSpace(in.TargetName)
+	if name == "" {
+		name = defaultTargetName
+	}
 	cfg := &config.Config{
 		Default: name,
-		Targets: map[string]config.Target{name: target},
+		Targets: map[string]config.Target{name: BuildTarget(in)},
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

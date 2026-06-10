@@ -69,6 +69,8 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newInitCommand(stdout, stderr, defaultInitRun))
 	cmd.AddCommand(newSetupCommand(stdout, stderr, defaultSetupRun))
 	cmd.AddCommand(newRemoteInitCommand(stdout, stderr, defaultRemoteInitRun))
+	cmd.AddCommand(newDoctorCommand(stdout, stderr, defaultDoctorRun))
+	cmd.AddCommand(newTargetCommand(stdout, stderr))
 
 	return cmd
 }
