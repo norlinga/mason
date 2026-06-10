@@ -101,11 +101,30 @@ func TestRemoteInitScriptNoReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoteInitScript: %v", err)
 	}
-	if strings.Contains(script, "systemctl reload caddy\n") && !strings.Contains(script, "#   caddy validate") {
-		t.Fatal("no-reload still issues an unguarded reload")
+	if strings.Contains(script, "if [ \"$CADDY_GROUP_CHANGED\" -eq 1 ]; then") {
+		t.Fatal("no-reload still emits an active apply block")
 	}
-	if !strings.Contains(script, "Reload Caddy yourself") {
-		t.Fatalf("missing manual-reload hint\n%s", script)
+	if !strings.Contains(script, "Apply the change yourself") {
+		t.Fatalf("missing manual-apply hint\n%s", script)
+	}
+}
+
+func TestRemoteInitScriptRestartsWhenGroupChanges(t *testing.T) {
+	script, err := RemoteInitScript(fullParams()) // Reload: true
+	if err != nil {
+		t.Fatalf("RemoteInitScript: %v", err)
+	}
+	// First-run group change must trigger a restart (reload won't pick up the new
+	// supplementary group); otherwise a reload suffices.
+	for _, want := range []string{
+		"CADDY_GROUP_CHANGED=1",
+		"if [ \"$CADDY_GROUP_CHANGED\" -eq 1 ]; then",
+		"systemctl restart caddy",
+		"systemctl reload caddy",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script missing %q\n---\n%s", want, script)
+		}
 	}
 }
 
