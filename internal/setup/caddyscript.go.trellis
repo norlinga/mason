@@ -1,0 +1,44 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-06-10
+
+Feature: Shared Caddy Script Fragments
+  "Reusable POSIX-sh fragments and helpers for the Caddy-touching bootstrap scripts (remote-init, site-init): Caddy group access, the single idempotent Caddyfile import, the validate-gated reload, plus base_url/site-address and shell-quoting helpers."
+
+  Provides:
+    - setup.shellQuote @source("symbol:shellQuote")
+    - setup.siteAddressFromBaseURL @source("symbol:siteAddressFromBaseURL")
+    - setup.hostOnly @source("symbol:hostOnly")
+    - setup.writeCaddyGroupAccessBlock @source("symbol:writeCaddyGroupAccessBlock")
+    - setup.writeCaddyImportBlock @source("symbol:writeCaddyImportBlock")
+    - setup.writeCaddyReloadBlock @source("symbol:writeCaddyReloadBlock")
+
+  Invariants:
+    - shellQuote MUST single-quote arbitrary values safely, including embedded single quotes
+    - siteAddressFromBaseURL MUST reduce a base_url to scheme://host, dropping any path, and MUST error on empty or hostless input
+    - writeCaddyImportBlock MUST be idempotent (grep -qF guarded) and append-only — it MUST never rewrite the main Caddyfile beyond the single import line
+    - writeCaddyReloadBlock MUST gate any apply on `caddy validate`, and MUST restart (not reload) when CADDY_GROUP_CHANGED is set so a new supplementary group is picked up
+    - writeCaddyReloadBlock with reload=false MUST emit only the manual steps, never an active apply
+    - All fragments MUST be deterministic functions of their inputs
+
+  OutOfScope:
+    - The share vhost snippet with /objects and /.mason 404s (remote-init owns caddyShareSnippet)
+    - The plain static vhost snippet (site-init owns caddyStaticSnippet)
+    - User, group, key, or directory creation (owning scripts emit those)
+    - Executing the script over SSH (cli owns --apply)
+
+  Scenario (happy-path): Idempotent import line
+    Given a snippet glob and a Caddyfile path
+    When writeCaddyImportBlock renders
+    Then the import line is appended only when grep -qF does not already find it
+
+  Scenario (happy-path): Restart when group changed
+    Given reload is requested
+    When writeCaddyReloadBlock renders
+    Then it validates first and restarts Caddy when CADDY_GROUP_CHANGED, else reloads
+
+  Scenario (negative): Empty base_url
+    Given an empty or hostless base_url
+    When siteAddressFromBaseURL runs
+    Then it returns an error and no site address

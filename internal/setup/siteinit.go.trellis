@@ -1,0 +1,55 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-06-10
+
+Feature: Static Host Provisioning Script Generator
+  "Renders the idempotent provisioning script for a plain static subdomain: a mason-owned, group-readable web root, Caddy group access, and a Mason-owned static Caddy snippet imported once. No share scaffolding, no user/key creation."
+
+  Provides:
+    - setup.SiteInitParams @source("symbol:SiteInitParams")
+    - setup.SiteInitScript @source("symbol:SiteInitScript")
+
+  Consumes:
+    - config.Target
+    - setup.writeCaddyGroupAccessBlock
+    - setup.writeCaddyImportBlock
+    - setup.writeCaddyReloadBlock
+
+  Invariants:
+    - SiteInitScript MUST be a deterministic, pure function of its params (same input, same script)
+    - The script MUST be idempotent for the web root, the snippet file, and the Caddyfile import line
+    - The Caddy snippet MUST be a plain static vhost and MUST NOT include /objects/* or /.mason/* matchers
+    - The script MUST NOT create users, groups, or SSH keys, and MUST assume the mason service user already exists
+    - The script MUST NOT emit share-tree scaffolding (objects/, s/, .mason/)
+    - The web root MUST be group-readable (2750, mason-owned) so Caddy can serve it
+    - A reload MUST be gated by `caddy validate`; without Reload the script only prints the manual steps
+    - The script MUST never rewrite the main Caddyfile beyond appending the single import line
+    - A missing web root or site address MUST return an error and produce no script
+    - --spa MUST add a try_files fallback to /index.html; default off
+
+  OutOfScope:
+    - Share tree scaffolding and the private-prefix 404 snippet (remote-init / future share-init)
+    - Service user, group, and deploy-key creation (remote-init)
+    - Executing the script over SSH (cli site-init owns --apply)
+    - rsync / deploy of the site contents
+
+  Scenario (happy-path): Plain static host
+    Given a target with a base_url and deploy.remote_path
+    When SiteInitScript renders
+    Then it creates the web root, grants Caddy group access, writes a plain static snippet, and imports it once
+
+  Scenario (edge): SPA fallback
+    Given SPA is true
+    When SiteInitScript renders
+    Then the snippet adds try_files {path} /index.html before file_server
+
+  Scenario (edge): Host and root overrides
+    Given Host and Root are set and the target lacks base_url / remote_path
+    When SiteInitScript renders
+    Then the overrides supply the site address and web root
+
+  Scenario (negative): Missing web root or site address
+    Given a target without deploy.remote_path/--root or without base_url/--host
+    When SiteInitScript renders
+    Then it returns an error and produces no script

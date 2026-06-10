@@ -1,0 +1,51 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-06-10
+
+Feature: Site Init Command
+  "CLI handler for mason site-init: print the static-host provisioning script, or apply it over SSH as an admin."
+
+  Provides:
+    - cli.newSiteInitCommand @source("symbol:newSiteInitCommand")
+    - cli.defaultSiteInitRun @source("symbol:defaultSiteInitRun")
+
+  Consumes:
+    - setup.SiteInitScript
+    - remote.SSHOptionsFromTarget
+    - remote.NewSSH
+    - output.WriteJSON
+
+  Invariants:
+    - The script MUST print verbatim to stdout by default; hints go to stderr so the script is pipeable
+    - --apply MUST require --as-admin and MUST connect as that admin user, not the target's deploy user
+    - A failed apply MUST surface the captured remote output and a concise error that never echoes the script body
+    - Quiet mode MUST suppress stderr hints while still emitting the script artifact
+    - JSON output MUST use the stable siteInitJSON shape under output.Success
+    - --host and --root MUST override the target-derived site address and web root
+    - A missing web root (no deploy.remote_path and no --root) MUST fail with a clear error
+
+  OutOfScope:
+    - Script content and idempotency rules (owned by setup.SiteInitScript)
+    - Service user, deploy key, and share scaffolding (remote-init)
+    - rsync / deploy of site contents (deploy command)
+
+  Scenario (happy-path): Print for review
+    Given a resolved target
+    When mason site-init runs without --apply
+    Then stdout is the raw script and stderr suggests the apply invocation
+
+  Scenario (happy-path): Apply as admin
+    Given --apply --as-admin root
+    When the script succeeds over SSH
+    Then remote output is echoed and an applied confirmation is printed
+
+  Scenario (negative): Apply without admin
+    Given --apply with no --as-admin
+    When the command runs
+    Then it fails with a usage error before any SSH attempt
+
+  Scenario (negative): Script fails remotely
+    Given --apply and a script that exits non-zero
+    When the command runs
+    Then captured remote output is shown and the error reports the exit code only

@@ -2,18 +2,15 @@ package setup
 
 import (
 	"fmt"
-	"net/url"
 	"path"
 	"strings"
 
 	"github.com/norlinga/mason/internal/config"
 )
 
-// Defaults for remote-init server bootstrap.
+// Defaults specific to remote-init server bootstrap. Shared Caddy defaults and
+// helpers live in caddyscript.go.
 const (
-	defaultCaddyUser   = "caddy"
-	defaultCaddyfile   = "/etc/caddy/Caddyfile"
-	defaultSnippetDir  = "/etc/caddy/mason.d"
 	authorizedKeyOpts  = "no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
 	defaultRemoteShell = "/bin/bash"
 )
@@ -120,45 +117,26 @@ func RemoteInitScript(p RemoteInitParams) (string, error) {
 	}
 
 	b.WriteString("# 5. Let Caddy read the served trees (least-privilege via group)\n")
-	b.WriteString("CADDY_GROUP_CHANGED=0\n")
-	b.WriteString("if id \"$CADDY_USER\" >/dev/null 2>&1; then\n")
-	b.WriteString("\tif ! id -nG \"$CADDY_USER\" | grep -qw \"$MASON_GROUP\"; then\n")
-	b.WriteString("\t\tusermod -aG \"$MASON_GROUP\" \"$CADDY_USER\"\n")
-	b.WriteString("\t\tCADDY_GROUP_CHANGED=1\n")
-	b.WriteString("\tfi\n")
-	b.WriteString("fi\n\n")
+	writeCaddyGroupAccessBlock(&b)
+	b.WriteString("\n")
 
 	b.WriteString("# 6. Caddy: Mason-owned snippet + single import (never rewrites your Caddyfile)\n")
 	b.WriteString("install -d -m 755 \"$SNIPPET_DIR\"\n")
 	fmt.Fprintf(&b, "cat > %s <<'CADDY'\n", shellQuote(snippetFile))
-	b.WriteString(caddySnippet(siteAddress, shareRoot))
+	b.WriteString(caddyShareSnippet(siteAddress, shareRoot))
 	b.WriteString("CADDY\n")
-	fmt.Fprintf(&b, "grep -qF %s \"$CADDYFILE\" 2>/dev/null || printf '\\nimport %%s/*.caddy\\n' \"$SNIPPET_DIR\" >> \"$CADDYFILE\"\n\n",
-		shellQuote("import "+snippetGlob))
+	writeCaddyImportBlock(&b, snippetGlob)
+	b.WriteString("\n")
 
-	if p.Reload {
-		b.WriteString("# 7. Validate, then restart Caddy if its group changed (a reload does not\n")
-		b.WriteString("#    re-exec the process, so new group membership is only picked up on restart);\n")
-		b.WriteString("#    otherwise a reload is enough.\n")
-		b.WriteString("caddy validate --config \"$CADDYFILE\"\n")
-		b.WriteString("if [ \"$CADDY_GROUP_CHANGED\" -eq 1 ]; then\n")
-		b.WriteString("\tsystemctl restart caddy\n")
-		b.WriteString("else\n")
-		b.WriteString("\tsystemctl reload caddy\n")
-		b.WriteString("fi\n")
-	} else {
-		b.WriteString("# 7. Apply the change yourself once you've reviewed it. Use restart (not reload)\n")
-		b.WriteString("#    on first run so Caddy picks up its new group membership:\n")
-		b.WriteString("#   caddy validate --config \"$CADDYFILE\" && systemctl restart caddy\n")
-	}
+	writeCaddyReloadBlock(&b, 7, p.Reload)
 
 	return b.String(), nil
 }
 
-// caddySnippet renders the share vhost: serve the root, but hard-404 the private
+// caddyShareSnippet renders the share vhost: serve the root, but hard-404 the private
 // prefixes so blobs are reachable only via their symlinks and the manifest is never
 // public.
-func caddySnippet(siteAddress, root string) string {
+func caddyShareSnippet(siteAddress, root string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s {\n", siteAddress)
 	fmt.Fprintf(&b, "\troot * %s\n", root)
@@ -167,37 +145,4 @@ func caddySnippet(siteAddress, root string) string {
 	b.WriteString("\trespond @mason_private 404\n")
 	b.WriteString("}\n")
 	return b.String()
-}
-
-// siteAddressFromBaseURL reduces a base_url to a Caddy site address (scheme://host),
-// dropping any path so the snippet block is stable.
-func siteAddressFromBaseURL(baseURL string) (string, error) {
-	raw := strings.TrimSpace(baseURL)
-	if raw == "" {
-		return "", fmt.Errorf("target base_url is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("invalid base_url %q", baseURL)
-	}
-	if u.Scheme == "" {
-		return u.Host, nil
-	}
-	return u.Scheme + "://" + u.Host, nil
-}
-
-// hostOnly strips a scheme from a site address for display in the run hint.
-func hostOnly(siteAddress string) string {
-	if _, host, ok := strings.Cut(siteAddress, "://"); ok {
-		return host
-	}
-	return siteAddress
-}
-
-// shellQuote single-quotes a value for safe embedding in the generated script.
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

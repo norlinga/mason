@@ -91,6 +91,29 @@ mason deploy [target]      # rsync the build tree; plan → progress → summary
 mason deploy --delete      # also remove remote files absent locally (confirmed)
 ```
 
+### Provisioning a static subdomain
+
+`deploy` is pure rsync — it never touches Caddy. To stand up a brand-new **plain
+static** subdomain (no share object store), `site-init` provisions the serving side
+first. Like `remote-init`, it prints an idempotent script by default; `--apply` runs
+it over SSH as an admin. It creates the web root (mason-owned, group-readable for
+Caddy), grants Caddy read access, and adds a Mason-owned static Caddy vhost imported
+once — no users, keys, or share scaffolding.
+
+```sh
+mason site-init -t home                       # review the script
+mason site-init -t home --apply --as-admin root
+mason deploy                                  # rsync the build into the new root
+
+mason site-init -t home --spa                 # SPA build: try_files → /index.html
+```
+
+Host and root are derived from the target's `base_url` and `deploy.remote_path`;
+override with `--host` / `--root` for ad-hoc use before a `.mason` exists.
+
+**Prerequisite:** `mason remote-init` has already run on the host, so the `mason`
+user, deploy key, and Caddyfile import discipline exist.
+
 ## Targets
 
 `~/.mason` (or a project `.mason` found by walking up from the cwd) holds named

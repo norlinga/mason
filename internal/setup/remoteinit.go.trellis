@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-06-10
 
 Feature: Remote Bootstrap Script Generator
   "Renders the idempotent server bootstrap script for a target: service user, hardened deploy key, share/deploy trees, Caddy access, and a Mason-owned Caddy snippet."
@@ -12,6 +12,9 @@ Feature: Remote Bootstrap Script Generator
 
   Consumes:
     - config.Target
+    - setup.writeCaddyGroupAccessBlock
+    - setup.writeCaddyImportBlock
+    - setup.writeCaddyReloadBlock
 
   Invariants:
     - RemoteInitScript MUST be a deterministic, pure function of its params (same input, same script)
