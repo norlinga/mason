@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Manifest Sync Command
   "CLI handler for mason sync: reconcile local cache from the authoritative remote manifest."
@@ -11,8 +11,7 @@ Feature: Manifest Sync Command
     - cli.defaultSyncRun @source("symbol:defaultSyncRun")
 
   Consumes:
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - remote.Sync
 
   Invariants:

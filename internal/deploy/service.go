@@ -17,9 +17,8 @@ type Rsync interface {
 
 // Service orchestrates deploy planning and execution.
 type Service struct {
-	targetName string
-	target     config.Target
-	rsync      Rsync
+	site  config.Site
+	rsync Rsync
 }
 
 // DeployOptions configures one deploy run.
@@ -32,8 +31,10 @@ type DeployOptions struct {
 
 // Result reports the outcome of a deploy run.
 type Result struct {
-	TargetName string
-	Host       string
+	// Site is the site's name; URL its public address; Server its SSH destination.
+	Site       string
+	URL        string
+	Server     string
 	BuildDir   string
 	RemotePath string
 	Plan       Plan
@@ -43,17 +44,18 @@ type Result struct {
 	Duration   time.Duration
 }
 
-// NewService builds a deploy service for a resolved target.
-func NewService(targetName string, target config.Target, rsync Rsync) *Service {
-	return &Service{targetName: targetName, target: target, rsync: rsync}
+// NewService builds a deploy service for a resolved site.
+func NewService(site config.Site, rsync Rsync) *Service {
+	return &Service{site: site, rsync: rsync}
 }
 
 // Execute transfers files for a plan that is not already up to date.
 func (s *Service) Execute(ctx context.Context, opts DeployOptions, plan Plan) (Result, error) {
 	start := time.Now()
 	result := Result{
-		TargetName: s.targetName,
-		Host:       s.target.Host,
+		Site:       s.site.Name,
+		URL:        s.site.URL,
+		Server:     s.serverName(),
 		BuildDir:   plan.BuildDir,
 		RemotePath: plan.RemotePath,
 		Plan:       plan,
@@ -70,13 +72,13 @@ func (s *Service) Execute(ctx context.Context, opts DeployOptions, plan Plan) (R
 		return Result{}, err
 	}
 
-	ssh := remote.SSHOptionsFromTarget(s.target)
+	ssh := sshOptions(s.site)
 	_, err = s.rsync.Upload(ctx, remote.RsyncRequest{
 		Source:      source,
-		Destination: deployDestination(s.target, plan.RemotePath),
+		Destination: deployDestination(s.site, plan.RemotePath),
 		Delete:      opts.Delete,
 		Filters:     DefaultFilters,
-		SSH:         &ssh,
+		SSH:         ssh,
 		OnProgress:  opts.OnProgress,
 	})
 	if err != nil {
@@ -91,7 +93,7 @@ func (s *Service) Execute(ctx context.Context, opts DeployOptions, plan Plan) (R
 // Run plans the deploy and optionally transfers files.
 func (s *Service) Run(ctx context.Context, opts DeployOptions) (Result, error) {
 	start := time.Now()
-	plan, err := NewPlanner(s.target, s.rsync).Plan(ctx, PlanOptions{
+	plan, err := NewPlanner(s.site, s.rsync).Plan(ctx, PlanOptions{
 		BaseDir: opts.BaseDir,
 		Delete:  opts.Delete,
 	})
@@ -100,8 +102,9 @@ func (s *Service) Run(ctx context.Context, opts DeployOptions) (Result, error) {
 	}
 
 	result := Result{
-		TargetName: s.targetName,
-		Host:       s.target.Host,
+		Site:       s.site.Name,
+		URL:        s.site.URL,
+		Server:     s.serverName(),
 		BuildDir:   plan.BuildDir,
 		RemotePath: plan.RemotePath,
 		Plan:       plan,
@@ -135,4 +138,11 @@ func FilesUpdated(plan Plan) int {
 // TotalFiles returns the number of regular files in the deploy tree per the plan.
 func TotalFiles(plan Plan) int {
 	return plan.Unchanged + plan.New + plan.Changed
+}
+
+func (s *Service) serverName() string {
+	if s.site.Server == nil {
+		return ""
+	}
+	return s.site.Server.Host
 }

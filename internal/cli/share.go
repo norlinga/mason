@@ -83,14 +83,10 @@ func renderShare(stdout io.Writer, opts output.Options, file string, res share.R
 
 // defaultShareRun wires the real remote stack and runs the share.
 func defaultShareRun(ctx context.Context, root rootOptions, file, as string) (share.Result, error) {
-	resolved, err := resolveTarget(root)
+	stack, err := shareStack(root)
 	if err != nil {
 		return share.Result{}, err
 	}
-	stack, err := newRemoteStack(resolved)
-	if err != nil {
-		return share.Result{}, err
-	}
-	svc := share.NewService(stack.target, stack.fs, stack.store, stack.rsync, stack.links)
+	svc := share.NewService(stack.share, stack.fs, stack.store, stack.rsync, stack.links)
 	return svc.Share(ctx, share.Request{File: filepath.Clean(file), As: as})
 }

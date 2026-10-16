@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Share Command
   "CLI handler for mason share: publish a local file and print URLs."
@@ -12,8 +12,7 @@ Feature: Share Command
 
   Consumes:
     - share.Service.Share
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - output.WriteJSON
 
   Invariants:

@@ -1,28 +1,32 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-10
-@reviewed: 2026-06-10
+@reviewed: 2026-10-15
 
-Feature: Target Diagnostics
-  "Read-only diagnostics for a Mason target: SSH reachability, remote permissions, manifest access, HTTP privacy probes, symlink serving, and Caddy reconcile."
+Feature: Diagnostics
+  "Read-only, role-aware diagnostics: every server in scope (SSH, rsync, Caddy import), the share store when configured (permissions, manifest, privacy probes, symlink serving), and the current project's site (web root, managed vhost, Caddy reconcile, HTTP response)."
 
   Provides:
     - setup.Diagnose @source("symbol:Diagnose")
     - setup.DoctorDeps @source("symbol:DoctorDeps")
+    - setup.DoctorScope @source("symbol:DoctorScope")
     - setup.DoctorReport @source("symbol:DoctorReport")
     - setup.DoctorCheck @source("symbol:DoctorCheck")
     - setup.CheckStatus @source("symbol:CheckStatus")
 
   Consumes:
-    - config.Target
+    - config.Server
+    - config.Share
+    - config.Site
     - remote.CommandRunner
     - remote.ManifestStore
     - domain.Manifest
-    - domain.ObjectURL
-    - domain.SlugURL
 
   Invariants:
     - Diagnose MUST stay read-only and never mutate remote state
+    - Diagnose MUST run only the checks for what is in scope: share checks only with a share store, site checks only with a site; a deploy-only machine MUST NOT report share failures
+    - Server checks MUST run once per distinct server, before share and site checks, and every check MUST carry its group
+    - The site vhost check MUST fail when the snippet is missing, and warn when it is hand-edited or does not 404 dotfiles
     - Probe failures MUST become fail or warn checks, not returned errors
     - DoctorReport.Healthy MUST tolerate warnings and fail only when a check status is fail
     - HTTP probes MUST verify /.mason/manifest.json and /objects/ are not publicly reachable (200)
@@ -30,16 +34,15 @@ Feature: Target Diagnostics
     - An empty manifest or no enabled endpoints MUST warn and skip the symlink probe, not fail
     - When manifest fetch fails, the symlink probe MUST warn as skipped rather than misreport
     - Caddy reconcile via the admin API MUST be best-effort: unreachable API yields warn on both host and root checks
-    - For an apex-domain target, Caddy reconcile MUST additionally check the www→apex redirect host and warn (not fail) when it is absent
+    - For an apex-domain site, Caddy reconcile MUST additionally check the www→apex redirect host and warn (not fail) when it is absent
     - Remote rsync availability MUST be verified on the server
 
   OutOfScope:
-    - Local onboarding and config writes (setup.Run)
-    - Remote bootstrap script generation (RemoteInitScript)
+    - Onboarding and config writes (setup.Run)
+    - Fixing anything it finds (provision, setup)
     - Unmanifested symlink drift detection and blob orphan audits
-    - Multi-target config editing (target subcommands, M-073)
 
-  Scenario (happy-path): Healthy target
+  Scenario (happy-path): Healthy share store
     Given SSH, writable trees, a readable manifest with an enabled endpoint, private prefixes, and matching Caddy config
     When Diagnose runs
     Then every critical check is ok and DoctorReport.Healthy is true
@@ -65,6 +68,11 @@ Feature: Target Diagnostics
     Then both Caddy checks warn and DoctorReport.Healthy remains true
 
   Scenario (edge): Apex domain missing www redirect
-    Given an apex-domain target whose Caddy config has no www host
+    Given an apex-domain site whose Caddy config has no www host
     When Diagnose runs
-    Then a www-redirect check warns with site-init and www-DNS guidance while the report stays healthy
+    Then a www-redirect check warns with provision and www-DNS guidance while the report stays healthy
+
+  Scenario (edge): Site-only scope
+    Given a project site and no share store configured
+    When Diagnose runs
+    Then server and site checks run and no share check appears

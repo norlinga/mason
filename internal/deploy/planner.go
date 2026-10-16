@@ -20,9 +20,9 @@ type Runner interface {
 	CompareDryRun(ctx context.Context, request remote.CompareDryRunRequest) (remote.ProcessResult, error)
 }
 
-// Planner builds deploy plans from configured targets.
+// Planner builds deploy plans for a configured site.
 type Planner struct {
-	target config.Target
+	site   config.Site
 	runner Runner
 }
 
@@ -44,20 +44,23 @@ type Plan struct {
 	BytesToSend int64
 }
 
-// NewPlanner builds a deploy planner for a target.
-func NewPlanner(target config.Target, runner Runner) *Planner {
-	return &Planner{target: target, runner: runner}
+// NewPlanner builds a deploy planner for a site.
+func NewPlanner(site config.Site, runner Runner) *Planner {
+	return &Planner{site: site, runner: runner}
 }
 
 // Plan diffs local build_dir against the remote deploy path using rsync dry-run.
 func (p *Planner) Plan(ctx context.Context, opts PlanOptions) (Plan, error) {
-	buildDir := strings.TrimSpace(p.target.Deploy.BuildDir)
-	remotePath := strings.TrimSpace(p.target.Deploy.RemotePath)
+	buildDir := strings.TrimSpace(p.site.Build)
+	remotePath := strings.TrimSpace(p.site.Path)
 	if buildDir == "" {
-		return Plan{}, fmt.Errorf("deploy.build_dir is required")
+		return Plan{}, fmt.Errorf("no build folder for %s — add 'build: <dir>' (e.g. dist, public) to .mason", p.site.Name)
 	}
 	if remotePath == "" {
-		return Plan{}, fmt.Errorf("deploy.remote_path is required")
+		return Plan{}, fmt.Errorf("no server path for %s", p.site.Name)
+	}
+	if p.site.Server == nil {
+		return Plan{}, fmt.Errorf("no server for %s", p.site.Name)
 	}
 
 	source, err := resolveBuildDir(buildDir, opts.BaseDir)
@@ -67,10 +70,10 @@ func (p *Planner) Plan(ctx context.Context, opts PlanOptions) (Plan, error) {
 
 	result, err := p.runner.CompareDryRun(ctx, remote.CompareDryRunRequest{
 		Source:      source,
-		Destination: deployDestination(p.target, remotePath),
+		Destination: deployDestination(p.site, remotePath),
 		Delete:      opts.Delete,
 		Filters:     DefaultFilters,
-		SSH:         sshOptions(p.target),
+		SSH:         sshOptions(p.site),
 	})
 	if err != nil {
 		return Plan{}, fmt.Errorf("compare deploy tree: %w", err)
@@ -180,7 +183,7 @@ func resolveBuildDir(buildDir, baseDir string) (string, error) {
 		return "", fmt.Errorf("stat build directory %q: %w", buildDir, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("deploy.build_dir %q is not a directory", buildDir)
+		return "", fmt.Errorf("build folder %q is not a directory", buildDir)
 	}
 
 	return ensureTrailingSlash(absPath), nil
@@ -192,13 +195,13 @@ func resolveBuildDir(buildDir, baseDir string) (string, error) {
 // (security.txt, ACME, app links). Excluded paths are also protected from --delete.
 var DefaultFilters = []string{"+ /.well-known/", "- .*"}
 
-func deployDestination(target config.Target, remotePath string) string {
+func deployDestination(site config.Site, remotePath string) string {
 	clean := strings.TrimSuffix(strings.TrimSpace(remotePath), "/") + "/"
-	return remote.RsyncDestinationFromTarget(target, clean)
+	return remote.RsyncDestination(*sshOptions(site), clean)
 }
 
-func sshOptions(target config.Target) *remote.SSHOptions {
-	opts := remote.SSHOptionsFromTarget(target)
+func sshOptions(site config.Site) *remote.SSHOptions {
+	opts := remote.SSHOptionsFromServer(*site.Server)
 	return &opts
 }
 

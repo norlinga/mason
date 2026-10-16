@@ -1,38 +1,40 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: CLI Wiring Helpers
-  "Shared target resolution, remote stack composition, cache sync, and error emission for subcommands."
+  "Shared config loading, share-store stack composition, cache sync, and error emission for subcommands."
 
   Provides:
-    - cli.resolveTarget @source("symbol:resolveTarget")
-    - cli.newRemoteStack @source("symbol:newRemoteStack")
+    - cli.loadConfig @source("symbol:loadConfig")
+    - cli.shareStack @source("symbol:shareStack")
     - cli.remoteSync @source("symbol:remoteSync")
     - cli.emitError @source("symbol:emitError")
     - cli.outputOptions @source("symbol:outputOptions")
 
   Consumes:
-    - config.LoadFile
-    - config.Config.ResolveTarget
+    - config.Load
+    - config.Config.RequireShare
+    - remote.SSHOptionsFromServer
     - remote.Sync
     - links.NewService
-    - output.NewError
 
   Invariants:
-    - resolveTarget MUST discover .mason when --config is unset
-    - newRemoteStack MUST wire SSH, RemoteFS, ManifestStore, LocalCache, Rsync, and links.Service without connecting until use
+    - loadConfig MUST merge ~/.mason with the nearest project .mason, or use --config as the project file when set
+    - shareStack MUST resolve the share store only from config.RequireShare, so share commands never act on a site's web root
+    - shareStack MUST key the local manifest cache by the share store's host
+    - shareStack MUST wire SSH, RemoteFS, ManifestStore, LocalCache, Rsync, and links.Service without connecting until use
     - emitError MUST write JSON failure envelopes to stdout when --json is set
     - remoteSync for read commands MUST discard divergence warnings (sync command surfaces them)
 
   OutOfScope:
     - Subcommand-specific rendering (owned by individual cli command files)
 
-  Scenario (happy-path): Resolve default target
-    Given a valid discovered config and no --target override
-    When resolveTarget runs
-    Then the configured default target is returned
+  Scenario (happy-path): Share stack from the user file
+    Given ~/.mason with a share store and a project .mason in the cwd
+    When shareStack runs
+    Then it wires the share store from ~/.mason, keyed by the share host, ignoring the project
 
   Scenario (happy-path): JSON error emission
     Given --json and a failing command

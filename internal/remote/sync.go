@@ -22,11 +22,11 @@ type SyncResult struct {
 	Diverged bool
 }
 
-// Sync reconciles the local cache for targetID against the authoritative remote
+// Sync reconciles the local cache for cacheID against the authoritative remote
 // manifest. The remote always wins: on any difference — including an unreadable or
 // corrupt cache — the cache is overwritten with the remote copy. When a pre-existing
 // cache diverged and warn is non-nil, a warning is written to warn (typically stderr).
-func Sync(ctx context.Context, store ManifestStore, cache *LocalCache, targetID string, warn io.Writer) (SyncResult, error) {
+func Sync(ctx context.Context, store ManifestStore, cache *LocalCache, cacheID string, warn io.Writer) (SyncResult, error) {
 	if store == nil {
 		return SyncResult{}, fmt.Errorf("manifest store is required")
 	}
@@ -39,7 +39,7 @@ func Sync(ctx context.Context, store ManifestStore, cache *LocalCache, targetID 
 		return SyncResult{}, fmt.Errorf("sync fetch remote: %w", err)
 	}
 
-	cached, ok, readErr := cache.Read(targetID)
+	cached, ok, readErr := cache.Read(cacheID)
 
 	update := true
 	diverged := false
@@ -56,13 +56,13 @@ func Sync(ctx context.Context, store ManifestStore, cache *LocalCache, targetID 
 	}
 
 	if update {
-		if err := cache.Write(targetID, remote); err != nil {
+		if err := cache.Write(cacheID, remote); err != nil {
 			return SyncResult{}, fmt.Errorf("sync write cache: %w", err)
 		}
 	}
 
 	if diverged && warn != nil {
-		fmt.Fprintf(warn, "warning: local cache for %q diverged from remote; replaced with remote copy\n", targetID)
+		fmt.Fprintf(warn, "warning: local cache for %q diverged from remote; replaced with remote copy\n", cacheID)
 	}
 
 	return SyncResult{Manifest: remote, CacheUpdated: update, Diverged: diverged}, nil

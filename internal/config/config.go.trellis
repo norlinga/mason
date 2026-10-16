@@ -1,44 +1,71 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
-Feature: YAML Configuration
-  "Loads, validates, discovers, and resolves Mason target configuration from .mason files."
+Feature: Configuration
+  "Loads the per-machine ~/.mason and the nearest project .mason, merges them, and resolves servers, sites, and the share store with derived defaults (config v2; see CONFIG.md)."
 
   Provides:
     - config.Config @source("symbol:Config")
-    - config.Target @source("symbol:Target")
-    - config.ShareConfig @source("symbol:ShareConfig")
-    - config.DeployConfig @source("symbol:DeployConfig")
-    - config.ResolvedTarget @source("symbol:ResolvedTarget")
-    - config.Parse @source("symbol:Parse")
-    - config.LoadFile @source("symbol:LoadFile")
-    - config.Config.Validate @source("symbol:Validate")
-    - config.Config.ResolveTarget @source("symbol:ResolveTarget")
-    - config.Discover @source("symbol:Discover")
+    - config.Server @source("symbol:Server")
+    - config.Site @source("symbol:Site")
+    - config.Share @source("symbol:Share")
+    - config.LoadOptions @source("symbol:LoadOptions")
+    - config.Load @source("symbol:Load")
+    - config.ParseServer @source("symbol:ParseServer")
+    - config.Config.Site @source("symbol:Site")
+    - config.Config.RequireShare @source("symbol:RequireShare")
+    - config.V1FormatError @source("symbol:V1FormatError")
+    - config.NewSite @source("symbol:NewSite")
+    - config.NewShare @source("symbol:NewShare")
 
   Invariants:
-    - Config MUST define a default target name that exists in targets
-    - Each target MUST require host, user, root, and base_url
-    - Discover MUST walk upward from cwd for .mason, then fall back to ~/.mason
+    - Load MUST merge ~/.mason with the nearest project .mason; a project file MUST NOT hide the user file
+    - Project discovery MUST walk upward from the start dir and MUST NOT treat the user file itself (~/.mason) as a project file
+    - A project file MUST NOT define share; the share store MUST come only from the user file, so share commands can never target a site's web root
+    - The user file MUST NOT define site, sites, or build
+    - A file using the v1 shape (targets/default keys) MUST fail with V1FormatError pointing at CONFIG.md
+    - Unknown keys MUST be rejected with the file, line, and the closest valid key when one is near
+    - A site's identity (Name default, snippet, cache) MUST derive from its URL host; two sites in one project MUST NOT share a host
+    - Site and share URLs MUST reduce to scheme://host; a URL with a path MUST be rejected; a bare host MUST default to https
+    - Site and share paths MUST default to /var/www/<url host>
+    - Server resolution MUST prefer site server, then project server, then user server; the SSH user MUST default to "mason"
+    - The first entry under sites MUST be the default site
+    - NewSite and NewShare MUST apply exactly the same normalization and defaults as Load
+    - Missing pieces (no server, no share, no sites) MUST surface as actionable errors only when a command asks for them, never at Load
 
-  Scenario (happy-path): Load project config
-    Given a valid .mason file in the tree
-    When Discover and LoadFile run from a subdirectory
-    Then the nearest ancestor .mason is loaded and validated
+  OutOfScope:
+    - Writing or editing config files (setup and init own that)
+    - SSH option rendering and connection behavior (internal/remote)
+    - Existence checks for build directories (deploy owns that)
 
-  Scenario (happy-path): Resolve explicit target
-    Given a config with multiple targets
-    When ResolveTarget is called with a target name override
-    Then the named target is returned
+  Scenario (happy-path): Two-line project file
+    Given ~/.mason with server and share, and a project .mason with site and build
+    When Load runs from a subdirectory of the project
+    Then the site resolves with path /var/www/<host>, user mason, and the user file's server
 
-  Scenario (negative): Missing default target
-    Given YAML where default names an undefined target
-    When Validate runs
-    Then it returns an error
+  Scenario (happy-path): Environments
+    Given a project with sites staging and live
+    When Site("") and Site("live") are called
+    Then staging is the default and live resolves by name or by host
 
-  Scenario (negative): No config found
-    Given no .mason in the ancestor chain or home directory
-    When Discover runs
-    Then it returns an error
+  Scenario (negative): Share in a project file
+    Given a project .mason with a share key
+    When Load runs
+    Then it fails explaining that share belongs in ~/.mason
+
+  Scenario (negative): v1 file
+    Given a .mason with default and targets keys
+    When Load runs
+    Then it returns V1FormatError naming the file and CONFIG.md
+
+  Scenario (negative): No server anywhere
+    Given a project site and no server in either file
+    When Site is called
+    Then it fails suggesting mason setup <host>
+
+  Scenario (edge): Run from the home directory
+    Given cwd is $HOME, where ~/.mason exists
+    When Load runs
+    Then ~/.mason is loaded as the user file and no project is found

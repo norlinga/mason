@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Share Link Mutations
   "Creates and updates share symlinks and patches the authoritative manifest without moving blob bytes."
@@ -50,7 +50,7 @@ Feature: Share Link Mutations
 
   OutOfScope:
     - Blob byte upload (owned by the share package)
-    - CLI rendering and target resolution (owned by internal/cli)
+    - CLI rendering and config resolution (owned by internal/cli)
 
   Scenario (happy-path): Create new share
     Given a manifest with the blob recorded but no share at the object path

@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Disable Endpoint Command
   "CLI handler for mason disable: stop one endpoint from resolving."
@@ -13,8 +13,7 @@ Feature: Disable Endpoint Command
 
   Consumes:
     - links.Service.Disable
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - output.WriteJSON
 
   Invariants:

@@ -1,0 +1,50 @@
+@owner: mason
+@stability: stable
+@since: 2026-10-15
+@reviewed: 2026-10-15
+
+Feature: Machine Keys
+  "Manages which machines may publish: lists, adds, and removes public keys in the mason user's authorized_keys, identified by comment and SHA256 fingerprint."
+
+  Provides:
+    - setup.AuthorizedKey @source("symbol:AuthorizedKey")
+    - setup.ParsePublicKey @source("symbol:ParsePublicKey")
+    - setup.KeyList @source("symbol:KeyList")
+    - setup.KeyAdd @source("symbol:KeyAdd")
+    - setup.KeyRemove @source("symbol:KeyRemove")
+
+  Consumes:
+    - remote.CommandRunner
+
+  Invariants:
+    - All operations MUST run as the mason user on its own authorized_keys; none MUST need an admin
+    - KeyAdd MUST validate the key (known type, decodable blob whose embedded type matches) before touching the server
+    - KeyAdd MUST be idempotent (a key already present, with any options, is not added twice) and MUST install with the restrict options
+    - Fingerprints MUST match OpenSSH's SHA256 format so they can be compared with ssh-keygen -lf
+    - KeyRemove MUST match exactly one key by comment or fingerprint, and MUST refuse to remove the last key or the key this machine is using unless forced
+    - KeyRemove MUST rewrite authorized_keys atomically and keep mode 600
+    - Lines that are not keys (comments, blanks) MUST be preserved on rewrite
+
+  OutOfScope:
+    - Bootstrapping the first key (setup.BootstrapScript, as an admin)
+    - Local key generation (setup.Keygen)
+
+  Scenario (happy-path): Authorize a second laptop
+    Given a valid public key line with comment mason@laptop2
+    When KeyAdd runs from an authorized machine
+    Then the key is appended with the restrict options and KeyList shows mason@laptop2
+
+  Scenario (negative): Malformed key
+    Given "ssh-ed25519 notbase64"
+    When KeyAdd runs
+    Then it fails without running any remote command
+
+  Scenario (negative): Removing this machine's key
+    Given the match names the key this machine uses
+    When KeyRemove runs without force
+    Then it refuses and the file is unchanged
+
+  Scenario (edge): Ambiguous comment
+    Given two keys with the same comment
+    When KeyRemove runs with that comment
+    Then it fails asking for the fingerprint instead

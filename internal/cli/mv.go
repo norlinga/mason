@@ -76,11 +76,7 @@ func renderMv(stdout io.Writer, opts output.Options, outcome mvOutcome) error {
 
 // defaultMvRun wires the real remote stack and runs the move.
 func defaultMvRun(ctx context.Context, root rootOptions, src, dst string) (mvOutcome, error) {
-	resolved, err := resolveTarget(root)
-	if err != nil {
-		return mvOutcome{}, err
-	}
-	stack, err := newRemoteStack(resolved)
+	stack, err := shareStack(root)
 	if err != nil {
 		return mvOutcome{}, err
 	}
@@ -88,5 +84,5 @@ func defaultMvRun(ctx context.Context, root rootOptions, src, dst string) (mvOut
 	if err != nil {
 		return mvOutcome{}, err
 	}
-	return mvOutcome{res: res, baseURL: resolved.Target.BaseURL}, nil
+	return mvOutcome{res: res, baseURL: stack.share.URL}, nil
 }

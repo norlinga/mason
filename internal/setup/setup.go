@@ -1,12 +1,12 @@
-// Package setup implements local onboarding (mason setup): collect target details,
-// ensure an SSH key exists, write a validated .mason config, and test connectivity.
-// It is local-only — it never bootstraps the server (that is remote-init). The core
-// is dependency-injected so the wizard logic is testable without real prompts or SSH.
+// Package setup implements Mason's server-facing workflows: machine onboarding
+// (mason setup), the bootstrap/share-store/site provisioning scripts, per-machine key
+// management, project init, and doctor. Collaborators (prompts, key generation, SSH) are
+// injected so each flow is testable without a terminal or a server.
 package setup
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,369 +16,375 @@ import (
 
 	"github.com/norlinga/mason/internal/config"
 	"github.com/norlinga/mason/internal/remote"
-	"gopkg.in/yaml.v3"
 )
 
-const (
-	defaultKeyRelPath = ".ssh/id_ed25519"
-	defaultTargetName = "home"
-	defaultUser       = "mason"
-	defaultRoot       = "/srv/share"
-)
+// DefaultKeyPath is the key setup generates when no existing SSH setup reaches the server.
+const DefaultKeyPath = "~/.ssh/mason"
 
-// Input holds the target details collected from flags and/or prompts.
-type Input struct {
-	TargetName  string
-	Host        string
-	User        string
-	Root        string
-	BaseURL     string
-	KeyPath     string
-	Port        int
-	DefaultPath string
-	BuildDir    string
-	RemotePath  string
-}
+const defaultAdmin = "root"
 
 // Params controls one setup run.
 type Params struct {
-	Input       Input
-	ConfigPath  string // where to write config; "" → ~/.mason
-	GenerateKey bool   // create an SSH key if missing (the default onboarding path)
-	Force       bool   // overwrite an existing config
-	Test        bool   // test SSH connectivity after writing
-}
-
-// Result reports what setup did. A failed connectivity test is non-fatal and is
-// reported here rather than returned as an error.
-type Result struct {
-	ConfigPath   string
-	KeyPath      string
-	KeyExists    bool
-	KeyGenerated bool
-	Tested       bool
-	TestOK       bool
-	TestErr      string
-	Warnings     []string
-}
-
-// Prompter asks the user for a value, offering a default. Implementations read from
-// a terminal; tests inject a scripted prompter.
-type Prompter interface {
-	Ask(label, def string) (string, error)
-}
-
-// Keygen generates an SSH key pair at keyPath.
-type Keygen interface {
-	Generate(ctx context.Context, keyPath string) error
+	// Server is the destination as typed: host, user@host, host:port, or an ssh alias.
+	Server string
+	// Key is an explicit private key path (--key); "" lets setup decide.
+	Key string
+	// Admin is the user that may bootstrap the server (default root).
+	Admin string
+	// AdminKey is an explicit key for the admin connection; "" uses the normal SSH setup.
+	AdminKey string
+	// ShareURL, when set, provisions the share store at that URL and records it.
+	ShareURL string
+	// SharePath overrides the share store's path (default /var/www/<share host>).
+	SharePath string
+	// Bootstrap forces the bootstrap even when the mason user is already reachable.
+	Bootstrap bool
+	// PrintOnly renders the scripts and changes nothing.
+	PrintOnly bool
+	// Yes answers confirmations.
+	Yes bool
+	// UserFile is the config path to write (default ~/.mason).
+	UserFile string
+	// ControlDir multiplexes SSH connections; "" disables multiplexing.
+	ControlDir string
 }
 
 // Deps are the injectable collaborators for Run.
 type Deps struct {
-	// Prompter fills empty Input fields. When nil, no prompting occurs and only
-	// flag-supplied values plus built-in defaults are used.
-	Prompter Prompter
-	// Keygen creates a key when GenerateKey is set and none exists.
+	// Connect returns a command runner for the given SSH options.
+	Connect func(remote.SSHOptions) remote.CommandRunner
+	// Keygen creates a key pair.
 	Keygen Keygen
-	// Connect returns a command runner for the SSH connectivity test.
-	Connect func(target config.Target) remote.CommandRunner
-	// HomeDir resolves the user's home directory; defaults to os.UserHomeDir.
+	// Confirm asks a yes/no question.
+	Confirm func(question string) (bool, error)
+	// Hostname names this machine in key comments; defaults to os.Hostname.
+	Hostname func() (string, error)
+	// HomeDir resolves ~; defaults to os.UserHomeDir.
 	HomeDir func() (string, error)
+	// Log receives progress lines; nil discards them.
+	Log io.Writer
 }
 
-// Run performs onboarding: fill input, build+validate config, ensure the key, write
-// the config, and optionally test connectivity.
-func Run(ctx context.Context, deps Deps, params Params) (Result, error) {
+// Result reports what setup did.
+type Result struct {
+	ConfigPath       string
+	ConfigBackup     string
+	ConfigChanged    bool
+	Server           string
+	KeyPath          string
+	KeyGenerated     bool
+	Bootstrapped     bool
+	ShareProvisioned bool
+	// Scripts holds the rendered scripts in PrintOnly mode.
+	Scripts []string
+}
+
+// Keygen generates an SSH key pair.
+type Keygen interface {
+	Generate(ctx context.Context, keyPath, comment string) error
+}
+
+// Run onboards this machine for a server. See setup.go.trellis for the contract.
+func Run(ctx context.Context, deps Deps, p Params) (Result, error) {
+	deps = withDefaults(deps)
+	logf := func(format string, args ...any) { fmt.Fprintf(deps.Log, format+"\n", args...) }
+
+	server, err := config.ParseServer(p.Server, "")
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Server: server.String()}
+
+	userFile := p.UserFile
+	if userFile == "" {
+		home, err := deps.HomeDir()
+		if err != nil {
+			return res, fmt.Errorf("resolve home directory: %w", err)
+		}
+		userFile = filepath.Join(home, config.FileName)
+	}
+
+	// A re-run starts from the key ~/.mason already records, so a key that is not in the
+	// agent is not mistaken for "nothing works" (which would generate a new one).
+	keyFromConfig := ""
+	if p.Key == "" {
+		if cfg, err := config.Load(config.LoadOptions{UserFile: userFile, NoProject: true}); err == nil &&
+			cfg.Server != nil && cfg.Server.Host == server.Host && cfg.Server.Key != "" {
+			p.Key, keyFromConfig = cfg.Server.Key, cfg.Server.Key
+		}
+	}
+
+	var share *config.Share
+	if strings.TrimSpace(p.ShareURL) != "" {
+		s, err := config.NewShare(p.ShareURL, p.SharePath, &server)
+		if err != nil {
+			return res, err
+		}
+		share = &s
+	}
+
+	if p.PrintOnly {
+		return printScripts(deps, p, server, share, res)
+	}
+
+	opts := sshOpts(server, p.ControlDir)
+	opts.AcceptNewHostKey = true
+
+	// 1. Does the existing SSH setup (explicit key, agent, ~/.ssh/config) already work?
+	keyPath := ""
+	if p.Key != "" {
+		if keyPath, err = expandPath(p.Key, deps.HomeDir); err != nil {
+			return res, err
+		}
+		opts.KeyPath = keyPath
+	}
+	reachable := ping(ctx, deps, opts) == nil
+	if !reachable && keyPath == "" {
+		// Fall back to Mason's own key, generating it if needed.
+		if keyPath, err = expandPath(DefaultKeyPath, deps.HomeDir); err != nil {
+			return res, err
+		}
+		if !fileExists(keyPath) {
+			host, _ := deps.Hostname()
+			logf("Generating %s for this machine…", DefaultKeyPath)
+			if err := deps.Keygen.Generate(ctx, keyPath, "mason@"+host); err != nil {
+				return res, fmt.Errorf("generate ssh key: %w", err)
+			}
+			res.KeyGenerated = true
+		}
+		opts.KeyPath = keyPath
+		reachable = ping(ctx, deps, opts) == nil
+	}
+	res.KeyPath = opts.KeyPath
+	if reachable {
+		logf("✓ %s is reachable", server)
+	}
+
+	// 2. Bootstrap the server as an admin when the mason user is not reachable.
+	if !reachable || p.Bootstrap {
+		pub, err := readPublicKey(opts.KeyPath, deps.HomeDir)
+		if err != nil {
+			return res, err
+		}
+		script, err := BootstrapScript(BootstrapParams{Host: server.Host, User: server.User, PublicKey: pub, Reload: true})
+		if err != nil {
+			return res, err
+		}
+		admin := adminOpts(server, p)
+		question := fmt.Sprintf("Bootstrap %s as %s? This creates the %q user, authorizes this machine's key, and adds Caddy's import line (review with --print).",
+			server.Host, admin.User, server.User)
+		if err := confirm(deps, p.Yes, question); err != nil {
+			return res, err
+		}
+		logf("Bootstrapping %s as %s…", server.Host, admin.Destination())
+		if out, err := deps.Connect(admin).Run(ctx, script); err != nil {
+			var ce *remote.ConnectError
+			if errors.As(err, &ce) {
+				return res, fmt.Errorf("%w\nIf another machine can already publish to %s, authorize this one from there:\n  mason key add '%s'",
+					err, server.Host, pub)
+			}
+			return res, fmt.Errorf("bootstrap failed: %w\n%s", err, strings.TrimSpace(out.Stdout+out.Stderr))
+		}
+		res.Bootstrapped = true
+		opts.AcceptNewHostKey = false
+		if err := ping(ctx, deps, opts); err != nil {
+			return res, fmt.Errorf("bootstrap ran, but %s is still unreachable: %w", server, err)
+		}
+		logf("✓ %s is reachable", server)
+	}
+
+	// 3. Share store, when asked for.
+	if share != nil {
+		script, err := ShareStoreScript(ShareStoreParams{Share: *share, Reload: true})
+		if err != nil {
+			return res, err
+		}
+		admin := adminOpts(server, p)
+		if err := confirm(deps, p.Yes, fmt.Sprintf("Provision the share store %s at %s:%s as %s?", share.URL, server.Host, share.Path, admin.User)); err != nil {
+			return res, err
+		}
+		logf("Provisioning share store %s…", share.URL)
+		if out, err := deps.Connect(admin).Run(ctx, script); err != nil {
+			return res, fmt.Errorf("share store provisioning failed: %w\n%s", err, strings.TrimSpace(out.Stdout+out.Stderr))
+		}
+		res.ShareProvisioned = true
+	}
+
+	// 4. Record what worked.
+	keyToWrite := ""
+	if opts.KeyPath != "" && keyFromConfig == "" {
+		keyToWrite = contractHome(opts.KeyPath, deps.HomeDir)
+	}
+	write, err := WriteUserConfig(userFile, UserConfigValues{
+		Server:    serverValue(server),
+		Key:       keyToWrite,
+		ShareURL:  shareURL(share),
+		SharePath: sharePathValue(share, p.SharePath),
+	})
+	if err != nil {
+		return res, err
+	}
+	res.ConfigPath, res.ConfigChanged, res.ConfigBackup = userFile, write.Changed, write.Backup
+	return res, nil
+}
+
+func printScripts(deps Deps, p Params, server config.Server, share *config.Share, res Result) (Result, error) {
+	keyPath := p.Key
+	if keyPath == "" {
+		keyPath = DefaultKeyPath
+	}
+	pub, err := readPublicKey(keyPath, deps.HomeDir)
+	if err != nil {
+		pub = "ssh-ed25519 <public key of " + keyPath + " — run 'mason setup' without --print to generate it>"
+	}
+	script, err := BootstrapScript(BootstrapParams{Host: server.Host, User: server.User, PublicKey: pub, Reload: true})
+	if err != nil {
+		return res, err
+	}
+	res.Scripts = append(res.Scripts, script)
+	if share != nil {
+		script, err := ShareStoreScript(ShareStoreParams{Share: *share, Reload: true})
+		if err != nil {
+			return res, err
+		}
+		res.Scripts = append(res.Scripts, script)
+	}
+	return res, nil
+}
+
+func withDefaults(deps Deps) Deps {
 	if deps.HomeDir == nil {
 		deps.HomeDir = os.UserHomeDir
 	}
-
-	in := params.Input
-	if deps.Prompter != nil {
-		filled, err := fillInput(in, deps.Prompter)
-		if err != nil {
-			return Result{}, err
-		}
-		in = filled
+	if deps.Hostname == nil {
+		deps.Hostname = os.Hostname
 	}
-
-	// Resolve the key path before building config so the written .mason records
-	// the path actually used, not an empty field backed by runtime defaults.
-	keyPath, err := ResolveKeyPath(in.KeyPath, deps.HomeDir)
-	if err != nil {
-		return Result{}, err
+	if deps.Log == nil {
+		deps.Log = io.Discard
 	}
-	in.KeyPath = keyPath
-
-	cfg, err := BuildConfig(in)
-	if err != nil {
-		return Result{}, err
+	if deps.Connect == nil {
+		deps.Connect = func(o remote.SSHOptions) remote.CommandRunner { return remote.NewSSH(o) }
 	}
-	target := cfg.Targets[cfg.Default]
-
-	data, err := MarshalConfig(cfg)
-	if err != nil {
-		return Result{}, err
+	if deps.Keygen == nil {
+		deps.Keygen = NewSystemKeygen()
 	}
-
-	result := Result{KeyPath: keyPath, Warnings: Warnings(target)}
-	result.KeyExists = fileExists(keyPath)
-	if !result.KeyExists && params.GenerateKey {
-		if deps.Keygen == nil {
-			return Result{}, fmt.Errorf("key generation requested but no keygen is configured")
-		}
-		if err := deps.Keygen.Generate(ctx, keyPath); err != nil {
-			return Result{}, fmt.Errorf("generate ssh key: %w", err)
-		}
-		result.KeyGenerated = true
-		result.KeyExists = true
-	}
-	if !result.KeyExists {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("no SSH key at %s; connectivity test skipped — generate one with ssh-keygen -t ed25519 or rerun setup without --no-generate-key", keyPath))
-	}
-
-	configPath, err := resolveConfigPath(params.ConfigPath, deps.HomeDir)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := WriteConfigFile(configPath, data, params.Force); err != nil {
-		return Result{}, err
-	}
-	result.ConfigPath = configPath
-
-	if params.Test && result.KeyExists && deps.Connect != nil {
-		result.Tested = true
-		if err := TestConnection(ctx, deps.Connect(target)); err != nil {
-			result.TestErr = err.Error()
-		} else {
-			result.TestOK = true
-		}
-	}
-	return result, nil
+	return deps
 }
 
-// BuildTarget assembles a config.Target from input, applying defaults (user → mason).
-// It does not validate on its own; callers validate via the enclosing config.
-func BuildTarget(in Input) config.Target {
-	user := strings.TrimSpace(in.User)
-	if user == "" {
-		user = defaultUser
-	}
-	target := config.Target{
-		Host:    strings.TrimSpace(in.Host),
-		User:    user,
-		Root:    strings.TrimSpace(in.Root),
-		BaseURL: strings.TrimSpace(in.BaseURL),
-		KeyPath: strings.TrimSpace(in.KeyPath),
-		Port:    in.Port,
-	}
-	target.Share.DefaultPath = strings.TrimSpace(in.DefaultPath)
-	target.Deploy.BuildDir = strings.TrimSpace(in.BuildDir)
-	target.Deploy.RemotePath = strings.TrimSpace(in.RemotePath)
-	return target
+func sshOpts(s config.Server, controlDir string) remote.SSHOptions {
+	return remote.SSHOptions{Host: s.Host, User: s.User, Port: s.Port, KeyPath: s.Key, ControlDir: controlDir}
 }
 
-// BuildConfig assembles a single-target config from input, applying defaults, and
-// validates it.
-func BuildConfig(in Input) (*config.Config, error) {
-	name := strings.TrimSpace(in.TargetName)
-	if name == "" {
-		name = defaultTargetName
-	}
-	cfg := &config.Config{
-		Default: name,
-		Targets: map[string]config.Target{name: BuildTarget(in)},
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+func adminOpts(s config.Server, p Params) remote.SSHOptions {
+	opts := sshOpts(s, "")
+	opts.User = orDefault(p.Admin, defaultAdmin)
+	opts.KeyPath = p.AdminKey
+	opts.AcceptNewHostKey = true
+	return opts
 }
 
-// MarshalConfig renders config as YAML.
-func MarshalConfig(cfg *config.Config) ([]byte, error) {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("marshal config: %w", err)
-	}
-	return data, nil
+func ping(ctx context.Context, deps Deps, opts remote.SSHOptions) error {
+	_, err := deps.Connect(opts).Run(ctx, "true")
+	return err
 }
 
-// Warnings returns onboarding best-practice nudges for a target. They are advisory,
-// never fatal.
-func Warnings(target config.Target) []string {
-	var warnings []string
-	switch user := strings.TrimSpace(target.User); user {
-	case "root":
-		warnings = append(warnings, "user is 'root': prefer a dedicated unprivileged 'mason' service account; run remote-init as an admin to create it")
-	case "", defaultUser:
-		// dedicated service user — the recommended path.
-	default:
-		warnings = append(warnings, fmt.Sprintf("user is %q: a dedicated 'mason' service account is recommended so a leaked deploy key only reaches the served trees", user))
+func confirm(deps Deps, yes bool, question string) error {
+	if yes {
+		return nil
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(target.BaseURL)), "http://") {
-		warnings = append(warnings, "base_url uses http:// (no TLS); https:// is strongly recommended")
+	if deps.Confirm == nil {
+		return fmt.Errorf("%s\nre-run with -y to proceed non-interactively", question)
 	}
-	return warnings
-}
-
-// ResolveKeyPath returns the absolute SSH key path, defaulting to ~/.ssh/id_ed25519.
-func ResolveKeyPath(keyPath string, home func() (string, error)) (string, error) {
-	keyPath = strings.TrimSpace(keyPath)
-	if keyPath == "" {
-		h, err := home()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		return filepath.Join(h, defaultKeyRelPath), nil
-	}
-	return expandHome(keyPath, home)
-}
-
-// WriteConfigFile writes config data to path, refusing to overwrite unless force.
-func WriteConfigFile(path string, data []byte, force bool) error {
-	if !force {
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("%s already exists; pass --force to overwrite", path)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat %s: %w", path, err)
-		}
-	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create config directory: %w", err)
-		}
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-// TestConnection runs a trivial remote command to verify SSH connectivity.
-func TestConnection(ctx context.Context, runner remote.CommandRunner) error {
-	if runner == nil {
-		return fmt.Errorf("no ssh runner")
-	}
-	res, err := runner.Run(ctx, "true")
+	okay, err := deps.Confirm(question)
 	if err != nil {
 		return err
 	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("remote check exited %d: %s", res.ExitCode, strings.TrimSpace(res.Stderr))
+	if !okay {
+		return errors.New("cancelled; nothing was changed on the server")
 	}
 	return nil
 }
 
-// NewSystemKeygen returns a Keygen that shells out to ssh-keygen (ed25519, no passphrase).
+// serverValue is the shortest destination that parses back to s.
+func serverValue(s config.Server) string {
+	if s.User == config.DefaultUser && s.Port == 0 {
+		return s.Host
+	}
+	return s.String()
+}
+
+func shareURL(s *config.Share) string {
+	if s == nil {
+		return ""
+	}
+	return s.URL
+}
+
+func sharePathValue(s *config.Share, explicit string) string {
+	if s == nil || strings.TrimSpace(explicit) == "" {
+		return ""
+	}
+	return s.Path
+}
+
+func readPublicKey(keyPath string, home func() (string, error)) (string, error) {
+	if keyPath == "" {
+		return "", errors.New("no key to authorize: pass --key, or let setup create " + DefaultKeyPath)
+	}
+	expanded, err := expandPath(keyPath, home)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(expanded + ".pub")
+	if err != nil {
+		return "", fmt.Errorf("read public key: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func expandPath(p string, home func() (string, error)) (string, error) {
+	p = strings.TrimSpace(p)
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	h, err := home()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(h, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/")), nil
+}
+
+// contractHome writes a path under $HOME as ~/…, so ~/.mason stays portable.
+func contractHome(p string, home func() (string, error)) string {
+	h, err := home()
+	if err != nil || h == "" {
+		return p
+	}
+	if rel, err := filepath.Rel(h, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return "~/" + filepath.ToSlash(rel)
+	}
+	return p
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// NewSystemKeygen returns a Keygen that shells out to ssh-keygen (ed25519). The key has
+// no passphrase; add one later with `ssh-keygen -p -f ~/.ssh/mason` and load it into
+// ssh-agent — Mason uses the agent automatically.
 func NewSystemKeygen() Keygen { return systemKeygen{} }
 
 type systemKeygen struct{}
 
-func (systemKeygen) Generate(ctx context.Context, keyPath string) error {
-	if dir := filepath.Dir(keyPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create key directory: %w", err)
-		}
+func (systemKeygen) Generate(ctx context.Context, keyPath, comment string) error {
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		return fmt.Errorf("create key directory: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyPath)
+	cmd := exec.CommandContext(ctx, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", keyPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ssh-keygen failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// StdinPrompter reads answers from a reader, echoing labels to a writer.
-type StdinPrompter struct {
-	r *bufio.Reader
-	w io.Writer
-}
-
-// NewStdinPrompter builds a terminal prompter over r/w.
-func NewStdinPrompter(r io.Reader, w io.Writer) *StdinPrompter {
-	return &StdinPrompter{r: bufio.NewReader(r), w: w}
-}
-
-// Ask prints the label (with default) and returns the entered line, or def when blank.
-func (p *StdinPrompter) Ask(label, def string) (string, error) {
-	if def != "" {
-		fmt.Fprintf(p.w, "%s [%s]: ", label, def)
-	} else {
-		fmt.Fprintf(p.w, "%s: ", label)
-	}
-	line, err := p.r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return def, nil
-	}
-	return line, nil
-}
-
-// fillInput prompts for any empty fields, leaving flag-supplied values untouched.
-func fillInput(in Input, p Prompter) (Input, error) {
-	ask := func(label, current, def string) (string, error) {
-		if strings.TrimSpace(current) != "" {
-			return current, nil
-		}
-		return p.Ask(label, def)
-	}
-	var err error
-	if in.TargetName, err = ask("Target name", in.TargetName, defaultTargetName); err != nil {
-		return in, err
-	}
-	if in.Host, err = ask("Remote host", in.Host, ""); err != nil {
-		return in, err
-	}
-	if in.User, err = ask("Remote user", in.User, defaultUser); err != nil {
-		return in, err
-	}
-	if in.Root, err = ask("Site root on server", in.Root, defaultRoot); err != nil {
-		return in, err
-	}
-	baseURLDefault := ""
-	if host := strings.TrimSpace(in.Host); host != "" {
-		baseURLDefault = "https://" + host
-	}
-	if in.BaseURL, err = ask("Public base URL", in.BaseURL, baseURLDefault); err != nil {
-		return in, err
-	}
-	if in.KeyPath, err = ask("SSH key path (blank = ~/.ssh/id_ed25519)", in.KeyPath, ""); err != nil {
-		return in, err
-	}
-	return in, nil
-}
-
-func resolveConfigPath(path string, home func() (string, error)) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		h, err := home()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		return filepath.Join(h, projectConfigName), nil
-	}
-	return expandHome(path, home)
-}
-
-func expandHome(path string, home func() (string, error)) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		h, err := home()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		if path == "~" {
-			return h, nil
-		}
-		return filepath.Join(h, strings.TrimPrefix(path, "~/")), nil
-	}
-	return path, nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

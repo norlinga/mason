@@ -1,0 +1,46 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-09
+@reviewed: 2026-10-15
+
+Feature: Server Bootstrap Script
+  "Renders the once-per-server script, run as an admin: the mason service user and group, this machine's restricted key, Caddy group access, and the single import of Mason's snippet directory. No vhosts, share trees, or site trees."
+
+  Provides:
+    - setup.BootstrapParams @source("symbol:BootstrapParams")
+    - setup.BootstrapScript @source("symbol:BootstrapScript")
+    - setup.AuthorizedKeyOptions @source("symbol:AuthorizedKeyOptions")
+
+  Consumes:
+    - setup.writeScriptPreamble
+    - setup.writeCaddyGroupAccessBlock
+    - setup.writeCaddyImportBlock
+    - setup.writeCaddyReloadBlock
+
+  Invariants:
+    - BootstrapScript MUST be a deterministic, pure function of its params
+    - A public key MUST be supplied, as a single line; there is no key-less bootstrap
+    - Every value embedded in the script MUST be single-quoted with shellQuote
+    - The key MUST be installed with AuthorizedKeyOptions and MUST NOT be appended twice
+    - The script MUST be idempotent for the user, group, key, Caddy group, and import line
+    - The script MUST NOT write vhosts, share trees, or site trees
+
+  OutOfScope:
+    - The share store (setup.ShareStoreScript) and sites (setup.ProvisionScript)
+    - Running the script (setup.Run, as the admin)
+    - Keys for additional machines once bootstrapped (setup.KeyAdd, as the mason user)
+
+  Scenario (happy-path): Fresh server
+    Given a public key and host example.com
+    When BootstrapScript renders
+    Then it creates mason, installs the restricted key once, grants Caddy group access, and imports mason.d once
+
+  Scenario (negative): Missing or multi-line key
+    Given an empty key or one containing a newline
+    When BootstrapScript renders
+    Then it returns an error and no script
+
+  Scenario (edge): Hostile key comment
+    Given a key comment containing quotes and shell metacharacters
+    When BootstrapScript renders
+    Then the comment is embedded inside a single-quoted string

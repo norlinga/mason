@@ -1,0 +1,45 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-10-15
+
+Feature: Provision Command
+  "CLI handler for mason provision [site]: render the site's provisioning script and, after confirmation, run it over SSH as an admin; --print shows it instead."
+
+  Provides:
+    - cli.newProvisionCommand @source("symbol:newProvisionCommand")
+    - cli.defaultProvisionRun @source("symbol:defaultProvisionRun")
+    - cli.confirmPrompt @source("symbol:confirmPrompt")
+
+  Consumes:
+    - config.Config.Site
+    - setup.ProvisionScript
+    - setup.SnippetPath
+    - remote.SSH
+
+  Invariants:
+    - --print MUST write the script verbatim to stdout and change nothing; hints go to stderr
+    - Without --print the script MUST run only after a yes (or -y), as the admin user (default root), using the user's normal SSH identity unless --admin-key is given
+    - A closed stdin at the confirmation MUST fail with a hint to use -y, never default to yes
+    - Exit status 3 from the script MUST surface as errHandEdited with the diff shown, suggesting --force; --force MUST set FORCE=1 for the script
+    - A failed apply MUST show the script's output and a concise error that never echoes the script body
+    - --apex and --subdomain MUST be mutually exclusive
+
+  OutOfScope:
+    - Script content (setup.ProvisionScript)
+    - Deploying content (deploy)
+
+  Scenario (happy-path): Provision after confirming
+    Given a project site and a yes answer
+    When mason provision runs
+    Then the script runs as root and the summary names the path and vhost, then suggests mason deploy
+
+  Scenario (negative): Hand-edited vhost
+    Given the server's vhost lacks the managed marker
+    When mason provision runs without --force
+    Then the diff is shown and the command fails suggesting --force
+
+  Scenario (edge): Print only
+    Given --print
+    When mason provision runs
+    Then stdout is exactly the script and nothing is executed

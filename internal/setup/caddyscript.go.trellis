@@ -1,15 +1,16 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-10
-@reviewed: 2026-06-10
+@reviewed: 2026-10-15
 
 Feature: Shared Caddy Script Fragments
-  "Reusable POSIX-sh fragments and helpers for the Caddy-touching bootstrap scripts (remote-init, site-init): Caddy group access, the single idempotent Caddyfile import, the validate-gated reload, plus base_url/site-address, apex-domain detection (Public Suffix List), and shell-quoting helpers."
+  "Reusable POSIX-sh fragments for the Caddy-touching admin scripts (bootstrap, share store, provision): script preamble with rollback hook, Caddy group access, the single idempotent Caddyfile import, managed snippet install, the validate-gated reload, apex-domain detection (Public Suffix List), and shell quoting."
 
   Provides:
     - setup.shellQuote @source("symbol:shellQuote")
-    - setup.siteAddressFromBaseURL @source("symbol:siteAddressFromBaseURL")
-    - setup.hostOnly @source("symbol:hostOnly")
+    - setup.ManagedMarker @source("symbol:ManagedMarker")
+    - setup.writeScriptPreamble @source("symbol:writeScriptPreamble")
+    - setup.writeSnippetInstall @source("symbol:writeSnippetInstall")
     - setup.splitSiteScheme @source("symbol:splitSiteScheme")
     - setup.isApexDomain @source("symbol:isApexDomain")
     - setup.writeCaddyGroupAccessBlock @source("symbol:writeCaddyGroupAccessBlock")
@@ -18,16 +19,18 @@ Feature: Shared Caddy Script Fragments
 
   Invariants:
     - shellQuote MUST single-quote arbitrary values safely, including embedded single quotes
-    - siteAddressFromBaseURL MUST reduce a base_url to scheme://host, dropping any path, and MUST error on empty or hostless input
     - isApexDomain MUST use the Public Suffix List so multi-label TLDs (.co.uk, .com.au) classify correctly, MUST treat a leading "www." as the apex it fronts, and MUST report false for subdomains and non-domains
     - writeCaddyImportBlock MUST be idempotent (grep -qF guarded) and append-only — it MUST never rewrite the main Caddyfile beyond the single import line
-    - writeCaddyReloadBlock MUST gate any apply on `caddy validate`, and MUST restart (not reload) when CADDY_GROUP_CHANGED is set so a new supplementary group is picked up
+    - writeSnippetInstall MUST NOT replace a snippet lacking the managed marker unless FORCE=1; it MUST then print the diff and exit 3, leaving the file untouched
+    - Under FORCE=1 a hand-written snippet MUST be backed up (.bak-<timestamp>) before replacement
+    - Backups and temp files MUST NOT end in .caddy, so Caddy's import glob never loads them
+    - writeCaddyReloadBlock MUST gate any apply on `caddy validate`, MUST restore the previous snippet (or remove a new one) and exit non-zero without reloading when validation fails, and MUST restart (not reload) when CADDY_GROUP_CHANGED is set so a new supplementary group is picked up
     - writeCaddyReloadBlock with reload=false MUST emit only the manual steps, never an active apply
     - All fragments MUST be deterministic functions of their inputs
 
   OutOfScope:
-    - The share vhost snippet with /objects and /.mason 404s (remote-init owns caddyShareSnippet)
-    - The plain static vhost snippet (site-init owns caddyStaticSnippet)
+    - The share vhost snippet (setup.ShareStoreScript)
+    - The static site vhost snippet (setup.ProvisionScript)
     - User, group, key, or directory creation (owning scripts emit those)
     - Executing the script over SSH (cli owns --apply)
 
@@ -41,10 +44,15 @@ Feature: Shared Caddy Script Fragments
     When writeCaddyReloadBlock renders
     Then it validates first and restarts Caddy when CADDY_GROUP_CHANGED, else reloads
 
-  Scenario (negative): Empty base_url
-    Given an empty or hostless base_url
-    When siteAddressFromBaseURL runs
-    Then it returns an error and no site address
+  Scenario (negative): Hand-written snippet
+    Given an existing snippet without the managed marker
+    When the install fragment runs without FORCE
+    Then it prints the diff, exits 3, and the file and Caddy are untouched
+
+  Scenario (negative): Invalid result
+    Given caddy validate fails after a snippet update
+    When the reload fragment runs
+    Then the previous snippet is restored and Caddy is not reloaded
 
   Scenario (edge): Multi-label TLD apex
     Given hosts example.com, www.example.com, and example.co.uk

@@ -1,0 +1,36 @@
+@owner: mason
+@stability: stable
+@since: 2026-10-15
+@reviewed: 2026-10-15
+
+Feature: Key Command
+  "CLI handler for mason key ls|add|rm: manage which machines may publish to the default server, as the mason user."
+
+  Provides:
+    - cli.newKeyCommand @source("symbol:newKeyCommand")
+    - cli.defaultKeyDeps @source("symbol:defaultKeyDeps")
+
+  Consumes:
+    - setup.KeyList
+    - setup.KeyAdd
+    - setup.KeyRemove
+    - remote.SSHOptionsFromServer
+
+  Invariants:
+    - key commands MUST act on the default server from config and fail suggesting mason setup when there is none
+    - key add MUST accept a key line, a .pub file path, or - for stdin
+    - key ls MUST mark the key this machine uses when it can be determined
+    - key rm MUST pass this machine's public key so it is protected unless --force
+
+  OutOfScope:
+    - Key validation and authorized_keys editing (setup.Key*)
+
+  Scenario (happy-path): Authorize a laptop
+    Given the 'mason key add' line printed by setup on the new laptop
+    When it runs on an authorized machine
+    Then the key is added and its comment and fingerprint are printed
+
+  Scenario (negative): No server configured
+    Given ~/.mason has no server
+    When mason key ls runs
+    Then it fails suggesting mason setup <host>

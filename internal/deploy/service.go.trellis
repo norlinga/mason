@@ -4,7 +4,7 @@
 @reviewed: 2026-10-15
 
 Feature: Deploy Orchestration
-  "Plans and executes build-directory rsync deploys with pre-flight diff and post-run summary inputs."
+  "Plans and executes rsync deploys of a site's build folder with pre-flight diff and post-run summary inputs."
 
   Provides:
     - deploy.Rsync @source("symbol:Rsync")
@@ -17,7 +17,7 @@ Feature: Deploy Orchestration
     - deploy.UpToDate @source("symbol:UpToDate")
 
   Consumes:
-    - config.Target
+    - config.Site
     - remote.CompareDryRunRequest
     - remote.RsyncRequest
     - deploy.Planner
@@ -49,6 +49,6 @@ Feature: Deploy Orchestration
     Then no rsync upload runs and UpToDate is true
 
   Scenario (negative): Missing deploy config
-    Given a target without deploy paths
+    Given a site without a build folder
     When Run executes
     Then it returns an error before transfer

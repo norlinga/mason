@@ -16,7 +16,7 @@ Feature: Share Upload Orchestration
     - share.Service.Share @source("symbol:Share")
 
   Consumes:
-    - config.Target
+    - config.Share
     - remote.RemoteFS
     - remote.ManifestStore
     - links.Service
@@ -25,7 +25,7 @@ Feature: Share Upload Orchestration
   Invariants:
     - Share MUST hash locally, upload only when the blob is absent from the manifest, then link
     - ensureBlob MUST record blob size and uploaded_at in the manifest after successful rsync
-    - Result MUST include long and short URLs derived from target base_url
+    - Result MUST include long and short URLs derived from the share store URL
 
   OutOfScope:
     - Remote-link mutations without upload (owned by the links package)

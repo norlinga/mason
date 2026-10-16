@@ -19,7 +19,7 @@ const (
 
 // LocalCache mirrors remote manifests on disk under the user cache directory:
 //
-//	{cacheDir}/mason/{target-id}/manifest.json
+//	{cacheDir}/mason/{cache-id}/manifest.json  (cache id = share store host)
 //
 // The cache is authoritative for nothing — it is a fast local copy of the remote
 // manifest, refreshed by sync (remote wins).
@@ -43,22 +43,22 @@ func NewLocalCacheAt(root string) *LocalCache {
 	return &LocalCache{root: strings.TrimSpace(root)}
 }
 
-// ManifestPath returns the cache file path for a target's manifest.
-func (c *LocalCache) ManifestPath(targetID string) (string, error) {
+// ManifestPath returns the cache file path for a share store's manifest.
+func (c *LocalCache) ManifestPath(cacheID string) (string, error) {
 	root, err := c.cacheRoot()
 	if err != nil {
 		return "", err
 	}
-	if err := validateTargetID(targetID); err != nil {
+	if err := validateCacheID(cacheID); err != nil {
 		return "", err
 	}
-	return filepath.Join(root, targetID, cacheManifestName), nil
+	return filepath.Join(root, cacheID, cacheManifestName), nil
 }
 
-// Read loads the cached manifest for targetID. It reports ok=false (with no error)
+// Read loads the cached manifest for cacheID. It reports ok=false (with no error)
 // when nothing has been cached yet.
-func (c *LocalCache) Read(targetID string) (manifest *domain.Manifest, ok bool, err error) {
-	path, err := c.ManifestPath(targetID)
+func (c *LocalCache) Read(cacheID string) (manifest *domain.Manifest, ok bool, err error) {
+	path, err := c.ManifestPath(cacheID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -78,9 +78,9 @@ func (c *LocalCache) Read(targetID string) (manifest *domain.Manifest, ok bool, 
 	return parsed, true, nil
 }
 
-// Write atomically replaces the cached manifest for targetID (temp + rename).
-func (c *LocalCache) Write(targetID string, manifest *domain.Manifest) error {
-	if err := validateTargetID(targetID); err != nil {
+// Write atomically replaces the cached manifest for cacheID (temp + rename).
+func (c *LocalCache) Write(cacheID string, manifest *domain.Manifest) error {
+	if err := validateCacheID(cacheID); err != nil {
 		return err
 	}
 
@@ -94,7 +94,7 @@ func (c *LocalCache) Write(targetID string, manifest *domain.Manifest) error {
 		return err
 	}
 
-	dir := filepath.Join(root, targetID)
+	dir := filepath.Join(root, cacheID)
 	if err := os.MkdirAll(dir, cacheDirMode); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
@@ -131,20 +131,20 @@ func (c *LocalCache) cacheRoot() (string, error) {
 	return c.root, nil
 }
 
-// validateTargetID guards against empty ids and path traversal in the cache key.
-func validateTargetID(targetID string) error {
-	id := strings.TrimSpace(targetID)
+// validateCacheID guards against empty ids and path traversal in the cache key.
+func validateCacheID(cacheID string) error {
+	id := strings.TrimSpace(cacheID)
 	if id == "" {
-		return fmt.Errorf("target id is required")
+		return fmt.Errorf("cache id is required")
 	}
-	if id != targetID {
-		return fmt.Errorf("target id %q has surrounding whitespace", targetID)
+	if id != cacheID {
+		return fmt.Errorf("cache id %q has surrounding whitespace", cacheID)
 	}
 	if strings.ContainsRune(id, '/') || strings.ContainsRune(id, filepath.Separator) {
-		return fmt.Errorf("target id %q cannot contain a path separator", targetID)
+		return fmt.Errorf("cache id %q cannot contain a path separator", cacheID)
 	}
 	if id == "." || id == ".." {
-		return fmt.Errorf("target id %q is not a valid cache key", targetID)
+		return fmt.Errorf("cache id %q is not a valid cache key", cacheID)
 	}
 	return nil
 }

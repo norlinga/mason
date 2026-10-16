@@ -16,12 +16,14 @@ import (
 
 const emptyCell = "—"
 
-// lsRunFunc returns the cached manifest and the target base URL for listing.
+// lsRunFunc returns the cached manifest and the share store URL for listing.
 type lsRunFunc func(ctx context.Context, root rootOptions) (lsData, error)
 
 type lsData struct {
 	manifest *domain.Manifest
 	baseURL  string
+	// stale explains why the listing came from the local cache instead of the server.
+	stale string
 }
 
 type lsShareJSON struct {
@@ -61,6 +63,9 @@ func newLsCommand(stdout, stderr io.Writer, run lsRunFunc) *cobra.Command {
 			data, err := run(cmd.Context(), root)
 			if err != nil {
 				return emitError(stdout, stderr, opts, err)
+			}
+			if data.stale != "" && !opts.Quiet {
+				fmt.Fprintln(stderr, "warning: "+data.stale)
 			}
 			prefix := ""
 			if len(args) == 1 {
@@ -194,24 +199,28 @@ func shortHash(blob string) string {
 
 // defaultLsRun best-effort syncs the cache from remote, then lists from cache.
 func defaultLsRun(ctx context.Context, root rootOptions) (lsData, error) {
-	resolved, err := resolveTarget(root)
+	stack, err := shareStack(root)
 	if err != nil {
 		return lsData{}, err
 	}
-	stack, err := newRemoteStack(resolved)
-	if err != nil {
-		return lsData{}, err
-	}
-	_, _ = remoteSync(ctx, stack, resolved.Name) // best-effort; cache still readable offline
+	// Best-effort: an unreachable server falls back to the cache, but never silently —
+	// and with no cache there is nothing truthful to show, so the error stands.
+	_, syncErr := remoteSync(ctx, stack, stack.cacheID)
 
-	manifest, ok, err := stack.cache.Read(resolved.Name)
+	manifest, ok, err := stack.cache.Read(stack.cacheID)
 	if err != nil {
 		return lsData{}, err
 	}
-	if !ok {
-		manifest = domain.NewManifest()
+	data := lsData{manifest: manifest, baseURL: stack.share.URL}
+	switch {
+	case syncErr != nil && !ok:
+		return lsData{}, syncErr
+	case syncErr != nil:
+		data.stale = "showing the cached list; could not reach the server: " + syncErr.Error()
+	case !ok:
+		data.manifest = domain.NewManifest()
 	}
-	return lsData{manifest: manifest, baseURL: resolved.Target.BaseURL}, nil
+	return data, nil
 }
 
 // renderTable prints a left-aligned columnar grid with two-space gaps.

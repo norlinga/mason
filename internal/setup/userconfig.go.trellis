@@ -1,0 +1,46 @@
+@owner: mason
+@stability: internal
+@since: 2026-10-15
+@reviewed: 2026-10-15
+
+Feature: User Config Writer
+  "Merges setup's results (server, key, share store) into ~/.mason, preserving the user's other keys and comments."
+
+  Provides:
+    - setup.WriteUserConfig @source("symbol:WriteUserConfig")
+    - setup.UserConfigValues @source("symbol:UserConfigValues")
+    - setup.UserConfigWrite @source("symbol:UserConfigWrite")
+
+  Consumes:
+    - config.Load
+
+  Invariants:
+    - Empty values MUST leave the corresponding key untouched
+    - Existing comments and unrelated keys MUST survive the merge
+    - A v1 file MUST be moved to <path>.v1.bak before a fresh v2 file is written, and the backup path reported
+    - The merged result MUST load through config.Load before it replaces the file; an invalid result MUST leave the original untouched
+    - An unchanged result MUST NOT rewrite the file
+
+  OutOfScope:
+    - Project .mason files (setup.InitProject)
+    - Deciding which values to record (setup.Run)
+
+  Scenario (happy-path): Fresh machine
+    Given no ~/.mason
+    When WriteUserConfig records server example.com and key ~/.ssh/mason
+    Then ~/.mason contains exactly those two keys
+
+  Scenario (happy-path): Add a share store to an existing file
+    Given ~/.mason with a comment and server
+    When WriteUserConfig records a share URL
+    Then the comment and server remain and share is added
+
+  Scenario (negative): v1 file present
+    Given ~/.mason in the default/targets shape
+    When WriteUserConfig runs
+    Then the old file is kept as ~/.mason.v1.bak and a v2 file is written
+
+  Scenario (edge): Nothing changed
+    Given ~/.mason already records the same values
+    When WriteUserConfig runs
+    Then the file is not rewritten and Changed is false

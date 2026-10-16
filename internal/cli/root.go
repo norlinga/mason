@@ -11,9 +11,7 @@ import (
 var version = "dev"
 
 type rootOptions struct {
-	target  string
 	json    bool
-	dryRun  bool
 	yes     bool
 	quiet   bool
 	verbose bool
@@ -44,13 +42,11 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.SetErr(stderr)
 
 	flags := cmd.PersistentFlags()
-	flags.StringVarP(&opts.target, "target", "t", "", "override the default target")
 	flags.BoolVar(&opts.json, "json", false, "emit machine-readable output")
-	flags.BoolVarP(&opts.dryRun, "dry-run", "n", false, "show what would happen without changing anything")
-	flags.BoolVarP(&opts.yes, "yes", "y", false, "skip confirmation prompts")
+	flags.BoolVarP(&opts.yes, "yes", "y", false, "answer yes to confirmations")
 	flags.BoolVarP(&opts.quiet, "quiet", "q", false, "minimal output")
 	flags.BoolVarP(&opts.verbose, "verbose", "v", false, "extra detail")
-	flags.StringVar(&opts.config, "config", "", "use a specific config file")
+	flags.StringVar(&opts.config, "config", "", "use this project .mason instead of searching upward")
 
 	cmd.AddCommand(newVersionCommand(stdout))
 	cmd.AddCommand(newShareCommand(stdout, stderr, defaultShareRun))
@@ -66,12 +62,11 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newSyncCommand(stdout, stderr, defaultSyncRun))
 	cmd.AddCommand(newDeployCommand(stdout, stderr, defaultDeployRun))
 	cmd.AddCommand(newStatusCommand(stdout, stderr, defaultDeployRun))
-	cmd.AddCommand(newInitCommand(stdout, stderr, defaultInitRun))
+	cmd.AddCommand(newInitCommand(stdout, stderr, defaultInitDeps))
 	cmd.AddCommand(newSetupCommand(stdout, stderr, defaultSetupRun))
-	cmd.AddCommand(newRemoteInitCommand(stdout, stderr, defaultRemoteInitRun))
-	cmd.AddCommand(newSiteInitCommand(stdout, stderr, defaultSiteInitRun))
+	cmd.AddCommand(newProvisionCommand(stdout, stderr, defaultProvisionRun))
 	cmd.AddCommand(newDoctorCommand(stdout, stderr, defaultDoctorRun))
-	cmd.AddCommand(newTargetCommand(stdout, stderr))
+	cmd.AddCommand(newKeyCommand(stdout, stderr, defaultKeyDeps))
 
 	return cmd
 }

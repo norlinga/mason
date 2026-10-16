@@ -27,11 +27,7 @@ func newEnableCommand(stdout, stderr io.Writer, run endpointRunFunc) *cobra.Comm
 
 // defaultEnableRun wires the real remote stack and enables the endpoint.
 func defaultEnableRun(ctx context.Context, root rootOptions, ref string) (links.EndpointResult, error) {
-	resolved, err := resolveTarget(root)
-	if err != nil {
-		return links.EndpointResult{}, err
-	}
-	stack, err := newRemoteStack(resolved)
+	stack, err := shareStack(root)
 	if err != nil {
 		return links.EndpointResult{}, err
 	}

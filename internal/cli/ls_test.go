@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +149,17 @@ func TestLsCommandJSONEmptyIsArray(t *testing.T) {
 `
 	if stdout != want {
 		t.Fatalf("ls json empty:\n got: %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestLsWarnsWhenShowingStaleCache(t *testing.T) {
+	stdout, stderr, err := runLsCommand(t, []string{"ls"}, func(context.Context, rootOptions) (lsData, error) {
+		return lsData{manifest: domain.NewManifest(), baseURL: "https://s.example.com", stale: "showing the cached list; could not reach the server: timeout"}, nil
+	})
+	if err != nil {
+		t.Fatalf("ls: %v", err)
+	}
+	if !strings.Contains(stderr, "warning: showing the cached list") || strings.Contains(stdout, "warning") {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
 	}
 }

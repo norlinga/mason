@@ -1,0 +1,59 @@
+@owner: mason
+@stability: stable
+@since: 2026-06-10
+@reviewed: 2026-10-15
+@allow-many-consumes: "Script composer: each consumed fragment renders one section of the generated script."
+
+Feature: Site Provisioning Script Generator
+  "Renders the idempotent script that stands up a site on its server (apex domain or subdomain): a mason-owned, group-readable web root, Caddy group access, and a Mason-managed static vhost named by the site's host. Apex domains also get a www→apex redirect."
+
+  Provides:
+    - setup.ProvisionParams @source("symbol:ProvisionParams")
+    - setup.ProvisionScript @source("symbol:ProvisionScript")
+    - setup.SnippetPath @source("symbol:SnippetPath")
+
+  Consumes:
+    - config.Site
+    - setup.writeScriptPreamble
+    - setup.writeCaddyGroupAccessBlock
+    - setup.writeSnippetInstall
+    - setup.writeCaddyImportBlock
+    - setup.writeCaddyReloadBlock
+
+  Invariants:
+    - ProvisionScript MUST be a deterministic, pure function of its params
+    - The snippet file MUST be named by the site's URL host (<snippet dir>/<host>.caddy), never by a user-chosen name, so two projects cannot overwrite each other's vhost
+    - The snippet MUST start with the managed marker; an existing snippet without it MUST NOT be replaced unless forced
+    - The vhost MUST be a static file_server and MUST 404 every dotfile path except /.well-known/*, after any SPA try_files and before file_server
+    - The vhost MUST NOT include the share store's /objects/* private-prefix matcher
+    - Apex vs subdomain MUST be auto-detected via the Public Suffix List, overridable by DomainMode; an apex MUST be served from the bare apex and (unless NoWWW) get a permanent www→apex redirect; a www-prefixed URL MUST normalize to the same result
+    - SPA MUST add try_files {path} /index.html; it comes from the site config or the --spa flag
+    - The script MUST NOT create users, groups, SSH keys, or share scaffolding
+    - The web root MUST be 2750, mason-owned, group-readable so Caddy can serve it
+    - A reload MUST be gated by caddy validate with rollback; without Reload the script only prints the manual steps
+
+  OutOfScope:
+    - Server bootstrap: users, keys, the Caddyfile import discipline (setup.BootstrapScript)
+    - Share store provisioning (setup.ShareStoreScript)
+    - Running the script over SSH (cli provision)
+    - Deploying content (deploy)
+
+  Scenario (happy-path): Subdomain site
+    Given a site https://blog.example.com
+    When ProvisionScript renders
+    Then it creates the web root, writes mason.d/blog.example.com.caddy with the marker and dotfile 404, and imports it once
+
+  Scenario (happy-path): Apex domain with www redirect
+    Given a site https://example.com or https://www.example.com
+    When ProvisionScript renders
+    Then it serves the bare apex and adds a permanent www.example.com → apex redirect block
+
+  Scenario (negative): Hand-written snippet
+    Given an existing snippet without the managed marker and FORCE unset
+    When the script runs
+    Then it prints the diff, leaves the file alone, and exits 3
+
+  Scenario (edge): SPA fallback
+    Given SPA is true
+    When ProvisionScript renders
+    Then the vhost has try_files {path} /index.html before the dotfile matcher and file_server

@@ -61,6 +61,9 @@ func newInfoCommand(stdout, stderr io.Writer, run lsRunFunc) *cobra.Command {
 			if err != nil {
 				return emitError(stdout, stderr, opts, err)
 			}
+			if data.stale != "" && !opts.Quiet {
+				fmt.Fprintln(stderr, "warning: "+data.stale)
+			}
 			share, err := resolveShareRef(data.manifest, args[0])
 			if err != nil {
 				return emitError(stdout, stderr, opts, err)

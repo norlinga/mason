@@ -78,16 +78,11 @@ func renderPrune(stdout io.Writer, opts output.Options, res links.PruneResult) e
 }
 
 // defaultPruneRun wires the real remote stack and runs prune. Deletion happens only
-// when --yes is set and --dry-run is not.
+// when --yes is set; otherwise prune reports what it would delete.
 func defaultPruneRun(ctx context.Context, root rootOptions) (links.PruneResult, error) {
-	resolved, err := resolveTarget(root)
+	stack, err := shareStack(root)
 	if err != nil {
 		return links.PruneResult{}, err
 	}
-	stack, err := newRemoteStack(resolved)
-	if err != nil {
-		return links.PruneResult{}, err
-	}
-	confirm := root.yes && !root.dryRun
-	return stack.links.Prune(ctx, links.PruneRequest{Confirm: confirm})
+	return stack.links.Prune(ctx, links.PruneRequest{Confirm: root.yes})
 }

@@ -106,8 +106,8 @@ func TestPruneCommandJSON(t *testing.T) {
 	}
 }
 
-// TestPruneCommandConfirmFlag verifies that --yes (without --dry-run) asks the
-// service to delete, while plain and --dry-run runs do not.
+// TestPruneCommandConfirmFlag verifies that --yes asks the service to delete, while a
+// plain run only reports.
 func TestPruneCommandConfirmFlag(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -116,14 +116,13 @@ func TestPruneCommandConfirmFlag(t *testing.T) {
 	}{
 		{"default dry-run", []string{"prune"}, false},
 		{"yes deletes", []string{"--yes", "prune"}, true},
-		{"dry-run overrides yes", []string{"--yes", "--dry-run", "prune"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotConfirm bool
 			_, _, err := runPruneCommand(t, tt.args,
 				func(_ context.Context, root rootOptions) (links.PruneResult, error) {
-					gotConfirm = root.yes && !root.dryRun
+					gotConfirm = root.yes
 					return links.PruneResult{}, nil
 				})
 			if err != nil {

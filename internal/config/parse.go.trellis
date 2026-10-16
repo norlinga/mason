@@ -1,0 +1,37 @@
+@owner: mason
+@stability: internal
+@since: 2026-10-15
+@reviewed: 2026-10-15
+
+Feature: Config File Reader
+  "Strict, position-aware reader for one .mason file: walks the YAML node tree, enforces which keys each file kind allows, and returns raw values tagged with file and line for error messages."
+
+  Provides:
+    - config.readFile @source("symbol:readFile")
+
+  Invariants:
+    - readFile MUST reject unknown and duplicate keys, reporting file:line and the nearest valid key or the v2 name of a v1 key
+    - readFile MUST detect the v1 shape (top-level default or targets) and return V1FormatError before any other validation
+    - User files MUST accept only server, key, share; project files MUST accept only server, key, build, site, sites
+    - A misplaced key (share in a project, site/sites/build in the user file) MUST get a message saying where it belongs
+    - site and share MUST accept either a URL string or a mapping with url plus optional fields; sites MUST keep file order
+    - A file MUST NOT use both site and sites
+    - An empty file MUST read as empty, not as an error
+
+  OutOfScope:
+    - Defaults, derivation, and merging (config.Load)
+
+  Scenario (happy-path): Short and long forms
+    Given site as a string in one file and as a mapping with url and path in another
+    When readFile runs
+    Then both yield a raw site with the url and line recorded
+
+  Scenario (negative): v1 key with a v2 name
+    Given a project file with build_dir
+    When readFile runs
+    Then the error names file:line and suggests build
+
+  Scenario (edge): Empty file
+    Given a zero-byte .mason
+    When readFile runs
+    Then it returns an empty raw file and no error

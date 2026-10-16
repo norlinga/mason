@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Move Share Command
   "CLI handler for mason mv: re-home a share's object-path endpoint."
@@ -12,8 +12,7 @@ Feature: Move Share Command
 
   Consumes:
     - links.Service.Move
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - output.WriteJSON
 
   Invariants:

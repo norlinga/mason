@@ -65,11 +65,7 @@ func renderRm(stdout io.Writer, opts output.Options, ref string, res links.Remov
 
 // defaultRmRun wires the real remote stack and runs the removal.
 func defaultRmRun(ctx context.Context, root rootOptions, ref string) (links.RemoveResult, error) {
-	resolved, err := resolveTarget(root)
-	if err != nil {
-		return links.RemoveResult{}, err
-	}
-	stack, err := newRemoteStack(resolved)
+	stack, err := shareStack(root)
 	if err != nil {
 		return links.RemoveResult{}, err
 	}

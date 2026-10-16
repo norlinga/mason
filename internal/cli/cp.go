@@ -76,11 +76,7 @@ func renderCp(stdout io.Writer, opts output.Options, outcome cpOutcome) error {
 
 // defaultCpRun wires the real remote stack and runs the copy.
 func defaultCpRun(ctx context.Context, root rootOptions, src, dst string) (cpOutcome, error) {
-	resolved, err := resolveTarget(root)
-	if err != nil {
-		return cpOutcome{}, err
-	}
-	stack, err := newRemoteStack(resolved)
+	stack, err := shareStack(root)
 	if err != nil {
 		return cpOutcome{}, err
 	}
@@ -88,5 +84,5 @@ func defaultCpRun(ctx context.Context, root rootOptions, src, dst string) (cpOut
 	if err != nil {
 		return cpOutcome{}, err
 	}
-	return cpOutcome{res: res, baseURL: resolved.Target.BaseURL}, nil
+	return cpOutcome{res: res, baseURL: stack.share.URL}, nil
 }

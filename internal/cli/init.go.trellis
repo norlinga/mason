@@ -1,22 +1,25 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Init Command
   "CLI handler for mason init that scaffolds a project .mason file."
 
   Provides:
     - cli.newInitCommand @source("symbol:newInitCommand")
-    - cli.defaultInitRun @source("symbol:defaultInitRun")
+    - cli.initDeps @source("symbol:initDeps")
 
   Consumes:
     - setup.InitProject
-    - output.WriteJSON
+    - setup.DetectBuildDir
+    - cli.defaultProvisionRun
 
   Invariants:
-    - init MUST write .mason in the current working directory by default
-    - init MUST refuse to overwrite an existing .mason file
+    - init MUST write .mason in the current directory and MUST refuse to overwrite an existing one
+    - The URL MUST default to the folder name when it looks like a domain; the build folder MUST default to the detected one
+    - Without -y init MUST prompt for URL and build folder (showing the defaults); with -y it MUST use the defaults and fail clearly when there is none
+    - Unless --no-provision, init MUST offer to provision the new site using the file it just wrote; a provisioning failure MUST NOT remove the file
 
   OutOfScope:
     - Interactive setup wizard (future M-070)

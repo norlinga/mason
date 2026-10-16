@@ -62,11 +62,7 @@ func renderEndpoint(stdout io.Writer, opts output.Options, ref string, res links
 
 // defaultDisableRun wires the real remote stack and disables the endpoint.
 func defaultDisableRun(ctx context.Context, root rootOptions, ref string) (links.EndpointResult, error) {
-	resolved, err := resolveTarget(root)
-	if err != nil {
-		return links.EndpointResult{}, err
-	}
-	stack, err := newRemoteStack(resolved)
+	stack, err := shareStack(root)
 	if err != nil {
 		return links.EndpointResult{}, err
 	}

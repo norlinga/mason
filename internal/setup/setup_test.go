@@ -2,316 +2,246 @@ package setup
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/norlinga/mason/internal/config"
 	"github.com/norlinga/mason/internal/remote"
 )
 
-// scriptPrompter answers from a map keyed by label, falling back to the offered default.
-type scriptPrompter struct {
-	answers map[string]string
-	asked   []string
+// fakeNet simulates servers: which destinations (user@host, keyed by key path) accept
+// connections, and what each ran. A bootstrap run as root authorizes the key it carries.
+type fakeNet struct {
+	authorized map[string]bool // "user@host|key" → reachable
+	adminOK    bool
+	ran        []string // "user@host: first line of command"
+	trusted    []bool   // AcceptNewHostKey per connection
 }
 
-func (p *scriptPrompter) Ask(label, def string) (string, error) {
-	p.asked = append(p.asked, label)
-	if v, ok := p.answers[label]; ok {
-		return v, nil
+func (n *fakeNet) connect(o remote.SSHOptions) remote.CommandRunner {
+	return scriptedRunner{fn: func(cmd string) (remote.CommandResult, error) {
+		n.trusted = append(n.trusted, o.AcceptNewHostKey)
+		dest := o.Destination()
+		if o.User == "root" {
+			if !n.adminOK {
+				return remote.CommandResult{ExitCode: -1}, &remote.ConnectError{Destination: dest, Reason: "permission denied"}
+			}
+			n.ran = append(n.ran, dest+": "+firstComment(cmd))
+			if strings.Contains(cmd, "mason server bootstrap") {
+				n.authorized["mason@"+o.Host+"|"+keyFromScript(cmd)] = true
+			}
+			return remote.CommandResult{}, nil
+		}
+		if !n.authorized[dest+"|"+o.KeyPath] {
+			return remote.CommandResult{ExitCode: -1}, &remote.ConnectError{Destination: dest, Reason: "permission denied"}
+		}
+		n.ran = append(n.ran, dest+": "+cmd)
+		return remote.CommandResult{}, nil
+	}}
+}
+
+func firstComment(script string) string {
+	for _, l := range strings.Split(script, "\n") {
+		if strings.HasPrefix(l, "# mason") {
+			return l
+		}
 	}
-	return def, nil
+	return ""
 }
 
-// fakeKeygen records generation and creates a placeholder key file.
-type fakeKeygen struct {
-	called int
-	err    error
-}
-
-func (k *fakeKeygen) Generate(_ context.Context, keyPath string) error {
-	k.called++
-	if k.err != nil {
-		return k.err
+// keyFromScript recovers which local key a bootstrap authorizes (tests embed the path
+// as the key comment).
+func keyFromScript(script string) string {
+	for _, l := range strings.Split(script, "\n") {
+		if strings.HasPrefix(l, "PUBKEY=") {
+			f := strings.Fields(strings.Trim(strings.TrimPrefix(l, "PUBKEY="), "'"))
+			return f[len(f)-1]
+		}
 	}
+	return ""
+}
+
+type fakeKeygen struct{ calls int }
+
+func (k *fakeKeygen) Generate(_ context.Context, keyPath, comment string) error {
+	k.calls++
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(keyPath, []byte("FAKE KEY"), 0o600)
+	if err := os.WriteFile(keyPath, []byte("private"), 0o600); err != nil {
+		return err
+	}
+	// The comment is the key path so fakeNet can tell keys apart.
+	return os.WriteFile(keyPath+".pub", []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl "+keyPath+"\n"), 0o644)
 }
 
-// fakeRunner stands in for an SSH command runner.
-type fakeRunner struct {
-	result remote.CommandResult
-	err    error
+func setupFixture(t *testing.T) (string, *fakeNet, *fakeKeygen, Deps) {
+	t.Helper()
+	home := t.TempDir()
+	net := &fakeNet{authorized: map[string]bool{}}
+	kg := &fakeKeygen{}
+	deps := Deps{
+		Connect:  net.connect,
+		Keygen:   kg,
+		HomeDir:  func() (string, error) { return home, nil },
+		Hostname: func() (string, error) { return "laptop", nil },
+	}
+	return home, net, kg, deps
 }
 
-func (r fakeRunner) Run(context.Context, string) (remote.CommandResult, error) {
-	return r.result, r.err
-}
+func TestSetupAlreadyWorkingChangesNothingRemote(t *testing.T) {
+	home, net, kg, deps := setupFixture(t)
+	net.authorized["mason@example.com|"] = true // agent / ~/.ssh/config already works
 
-func homeDirFunc(dir string) func() (string, error) {
-	return func() (string, error) { return dir, nil }
-}
-
-func TestBuildConfigDefaultsAndValidates(t *testing.T) {
-	cfg, err := BuildConfig(Input{Host: "h.example.com", Root: "/srv/share", BaseURL: "https://h.example.com"})
+	res, err := Run(context.Background(), deps, Params{Server: "example.com"})
 	if err != nil {
-		t.Fatalf("BuildConfig: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	if cfg.Default != "home" {
-		t.Fatalf("default = %q, want home", cfg.Default)
+	if kg.calls != 0 || res.Bootstrapped || res.KeyPath != "" {
+		t.Fatalf("res = %+v, keygen calls %d; want no key and no bootstrap", res, kg.calls)
 	}
-	target := cfg.Targets["home"]
-	if target.User != "mason" {
-		t.Fatalf("user = %q, want default mason", target.User)
+	if got := readFile(t, filepath.Join(home, ".mason")); got != "server: example.com\n" {
+		t.Fatalf("~/.mason = %q", got)
+	}
+	if !net.trusted[0] {
+		t.Fatal("first contact must accept a new host key")
+	}
+
+	// Second run: idempotent, config untouched.
+	res, err = Run(context.Background(), deps, Params{Server: "example.com"})
+	if err != nil || res.ConfigChanged {
+		t.Fatalf("second run: %+v, %v", res, err)
 	}
 }
 
-func TestBuildConfigMissingRequired(t *testing.T) {
-	if _, err := BuildConfig(Input{Root: "/srv/share", BaseURL: "https://x"}); err == nil {
-		t.Fatal("BuildConfig err = nil, want missing-host error")
+func TestSetupFreshServerBootstrapsAsAdmin(t *testing.T) {
+	home, net, kg, deps := setupFixture(t)
+	net.adminOK = true
+	var asked []string
+	deps.Confirm = func(q string) (bool, error) { asked = append(asked, q); return true, nil }
+
+	res, err := Run(context.Background(), deps, Params{Server: "example.com"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	keyPath := filepath.Join(home, ".ssh", "mason")
+	if kg.calls != 1 || res.KeyPath != keyPath || !res.KeyGenerated || !res.Bootstrapped {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(asked) != 1 || !strings.Contains(asked[0], "Bootstrap example.com as root") {
+		t.Fatalf("confirmation = %q", asked)
+	}
+	if !strings.HasPrefix(net.ran[0], "root@example.com: # mason server bootstrap") {
+		t.Fatalf("ran = %q", net.ran)
+	}
+	if last := net.trusted[len(net.trusted)-1]; last {
+		t.Fatal("verification after bootstrap must not accept new host keys")
+	}
+	want := "server: example.com\nkey: ~/.ssh/mason\n"
+	if got := readFile(t, filepath.Join(home, ".mason")); got != want {
+		t.Fatalf("~/.mason = %q, want %q", got, want)
 	}
 }
 
-func TestMarshalConfigRoundTrips(t *testing.T) {
-	cfg, err := BuildConfig(Input{
-		TargetName: "prod", Host: "h", User: "mason", Root: "/srv/share",
-		BaseURL: "https://h", DefaultPath: "inbox/", BuildDir: "./public", RemotePath: "/srv/site",
+func TestSetupNoAdminAccessPrintsKeyAdd(t *testing.T) {
+	home, _, _, deps := setupFixture(t)
+	_, err := Run(context.Background(), deps, Params{Server: "example.com", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "mason key add 'ssh-ed25519 ") {
+		t.Fatalf("err = %v, want a 'mason key add' line", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".mason")); !os.IsNotExist(statErr) {
+		t.Fatal("config written despite failure")
+	}
+}
+
+func TestSetupDeclinedChangesNothing(t *testing.T) {
+	home, net, _, deps := setupFixture(t)
+	net.adminOK = true
+	deps.Confirm = func(string) (bool, error) { return false, nil }
+
+	_, err := Run(context.Background(), deps, Params{Server: "example.com"})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(net.ran) != 0 {
+		t.Fatalf("remote ran %q after decline", net.ran)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".mason")); !os.IsNotExist(statErr) {
+		t.Fatal("config written after decline")
+	}
+}
+
+func TestSetupNonInteractiveWithoutYesRefuses(t *testing.T) {
+	_, net, _, deps := setupFixture(t)
+	net.adminOK = true
+	_, err := Run(context.Background(), deps, Params{Server: "example.com"})
+	if err == nil || !strings.Contains(err.Error(), "-y") {
+		t.Fatalf("err = %v, want a hint to use -y", err)
+	}
+	if len(net.ran) != 0 {
+		t.Fatalf("remote ran %q without confirmation", net.ran)
+	}
+}
+
+func TestSetupShareStore(t *testing.T) {
+	home, net, _, deps := setupFixture(t)
+	net.adminOK = true
+	net.authorized["mason@example.com|"] = true
+
+	res, err := Run(context.Background(), deps, Params{
+		Server: "example.com", ShareURL: "files.example.com", SharePath: "/var/www/share", Yes: true,
 	})
 	if err != nil {
-		t.Fatalf("BuildConfig: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	data, err := MarshalConfig(cfg)
-	if err != nil {
-		t.Fatalf("MarshalConfig: %v", err)
+	if res.Bootstrapped || !res.ShareProvisioned {
+		t.Fatalf("res = %+v", res)
 	}
-	parsed, err := config.Parse(data)
-	if err != nil {
-		t.Fatalf("re-parse rendered config: %v", err)
+	if len(net.ran) != 2 || !strings.Contains(net.ran[1], "root@example.com: # mason share store — https://files.example.com") {
+		t.Fatalf("ran = %q", net.ran)
 	}
-	got := parsed.Targets["prod"]
-	if got.Share.DefaultPath != "inbox/" || got.Deploy.RemotePath != "/srv/site" {
-		t.Fatalf("round-trip lost fields: %#v", got)
+	want := "server: example.com\nshare:\n  url: https://files.example.com\n  path: /var/www/share\n"
+	if got := readFile(t, filepath.Join(home, ".mason")); got != want {
+		t.Fatalf("~/.mason =\n%s\nwant\n%s", got, want)
 	}
 }
 
-func TestWarnings(t *testing.T) {
-	tests := []struct {
-		name   string
-		target config.Target
-		want   string // substring expected, or "" for none
-	}{
-		{"mason ok", config.Target{User: "mason", BaseURL: "https://x"}, ""},
-		{"root warns", config.Target{User: "root", BaseURL: "https://x"}, "root"},
-		{"personal warns", config.Target{User: "aaron", BaseURL: "https://x"}, "dedicated"},
-		{"http warns", config.Target{User: "mason", BaseURL: "http://x"}, "TLS"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Warnings(tt.target)
-			if tt.want == "" {
-				if len(got) != 0 {
-					t.Fatalf("warnings = %v, want none", got)
-				}
-				return
-			}
-			joined := strings.Join(got, "\n")
-			if !strings.Contains(joined, tt.want) {
-				t.Fatalf("warnings = %v, want substring %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveKeyPath(t *testing.T) {
-	home := homeDirFunc("/home/u")
-	got, err := ResolveKeyPath("", home)
-	if err != nil {
-		t.Fatalf("ResolveKeyPath default: %v", err)
-	}
-	if got != "/home/u/.ssh/id_ed25519" {
-		t.Fatalf("default key = %q", got)
-	}
-	got, err = ResolveKeyPath("~/keys/mason", home)
-	if err != nil {
-		t.Fatalf("ResolveKeyPath ~: %v", err)
-	}
-	if got != "/home/u/keys/mason" {
-		t.Fatalf("~ expansion = %q", got)
-	}
-	got, _ = ResolveKeyPath("/abs/key", home)
-	if got != "/abs/key" {
-		t.Fatalf("absolute key = %q", got)
-	}
-}
-
-func TestWriteConfigFileRefusesOverwrite(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".mason")
-	if err := WriteConfigFile(path, []byte("a: 1\n"), false); err != nil {
-		t.Fatalf("first write: %v", err)
-	}
-	if err := WriteConfigFile(path, []byte("a: 2\n"), false); err == nil {
-		t.Fatal("second write err = nil, want refuse-overwrite")
-	}
-	if err := WriteConfigFile(path, []byte("a: 3\n"), true); err != nil {
-		t.Fatalf("force write: %v", err)
-	}
-	data, _ := os.ReadFile(path)
-	if string(data) != "a: 3\n" {
-		t.Fatalf("force did not overwrite: %q", data)
-	}
-}
-
-func TestTestConnection(t *testing.T) {
-	if err := TestConnection(context.Background(), fakeRunner{result: remote.CommandResult{ExitCode: 0}}); err != nil {
-		t.Fatalf("ok runner: %v", err)
-	}
-	if err := TestConnection(context.Background(), fakeRunner{result: remote.CommandResult{ExitCode: 1, Stderr: "denied"}}); err == nil {
-		t.Fatal("nonzero exit err = nil, want error")
-	}
-	if err := TestConnection(context.Background(), fakeRunner{err: errors.New("dial")}); err == nil {
-		t.Fatal("dial error err = nil, want error")
-	}
-	if err := TestConnection(context.Background(), nil); err == nil {
-		t.Fatal("nil runner err = nil, want error")
-	}
-}
-
-func TestRunHappyPathGeneratesKeyWritesConfigAndTests(t *testing.T) {
-	home := t.TempDir()
-	keygen := &fakeKeygen{}
-	deps := Deps{
-		Prompter: &scriptPrompter{answers: map[string]string{
-			"Remote host":     "h.example.com",
-			"Public base URL": "https://h.example.com",
-		}},
-		Keygen:  keygen,
-		Connect: func(config.Target) remote.CommandRunner { return fakeRunner{} },
-		HomeDir: homeDirFunc(home),
-	}
-	res, err := Run(context.Background(), deps, Params{GenerateKey: true, Test: true})
+func TestSetupPrintOnlyChangesNothing(t *testing.T) {
+	home, net, kg, deps := setupFixture(t)
+	res, err := Run(context.Background(), deps, Params{Server: "example.com", ShareURL: "files.example.com", PrintOnly: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !res.KeyGenerated || keygen.called != 1 {
-		t.Fatalf("key not generated: %#v (calls=%d)", res, keygen.called)
+	if len(res.Scripts) != 2 || !strings.Contains(res.Scripts[0], "mason server bootstrap") || !strings.Contains(res.Scripts[1], "share store") {
+		t.Fatalf("scripts = %d", len(res.Scripts))
 	}
-	if res.ConfigPath != filepath.Join(home, ".mason") {
-		t.Fatalf("config path = %q", res.ConfigPath)
+	if kg.calls != 0 || len(net.trusted) != 0 {
+		t.Fatalf("print mode generated keys (%d) or connected (%d)", kg.calls, len(net.trusted))
 	}
-	if !res.Tested || !res.TestOK {
-		t.Fatalf("test result = %#v, want tested ok", res)
-	}
-	cfg, err := config.LoadFile(res.ConfigPath)
-	if err != nil {
-		t.Fatalf("written config invalid: %v", err)
-	}
-	if cfg.Targets[cfg.Default].Host != "h.example.com" {
-		t.Fatalf("written host = %q", cfg.Targets[cfg.Default].Host)
-	}
-	// The written config records the key path setup actually resolved and used.
-	if got, want := cfg.Targets[cfg.Default].KeyPath, filepath.Join(home, ".ssh/id_ed25519"); got != want {
-		t.Fatalf("written key_path = %q, want %q", got, want)
+	if _, err := os.Stat(filepath.Join(home, ".mason")); !os.IsNotExist(err) {
+		t.Fatal("print mode wrote config")
 	}
 }
 
-func TestRunMissingKeyWarnsAndSkipsTest(t *testing.T) {
-	home := t.TempDir()
-	connectCalled := false
-	deps := Deps{
-		Connect: func(config.Target) remote.CommandRunner {
-			connectCalled = true
-			return fakeRunner{}
-		},
-		HomeDir: homeDirFunc(home),
+func TestSetupRejectsURLAsServer(t *testing.T) {
+	_, _, _, deps := setupFixture(t)
+	if _, err := Run(context.Background(), deps, Params{Server: "https://example.com"}); err == nil {
+		t.Fatal("URL accepted as a server")
 	}
-	params := Params{
-		Input: Input{Host: "h", BaseURL: "https://h", Root: "/srv/share"},
-		Test:  true, // GenerateKey deliberately false
-	}
-	res, err := Run(context.Background(), deps, params)
+}
+
+func TestSetupRerunUsesConfiguredKey(t *testing.T) {
+	home, net, kg, deps := setupFixture(t)
+	key := filepath.Join(home, ".ssh", "id_ed25519")
+	writeExec(t, filepath.Join(home, ".mason"), "server: example.com\nkey: "+key+"\n")
+	net.authorized["mason@example.com|"+key] = true // works with that key; not in the agent
+
+	res, err := Run(context.Background(), deps, Params{Server: "example.com"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.KeyExists || res.KeyGenerated {
-		t.Fatalf("key state = %#v, want missing", res)
-	}
-	if res.Tested || connectCalled {
-		t.Fatal("connectivity test ran despite missing key")
-	}
-	joined := strings.Join(res.Warnings, "\n")
-	if !strings.Contains(joined, "no SSH key") {
-		t.Fatalf("warnings = %v, want a missing-key warning", res.Warnings)
-	}
-	if _, err := os.Stat(res.ConfigPath); err != nil {
-		t.Fatal("config not written despite missing key")
-	}
-}
-
-func TestFillInputDefaultsBaseURLFromHost(t *testing.T) {
-	p := &scriptPrompter{answers: map[string]string{"Remote host": "h.example.com"}}
-	in, err := fillInput(Input{}, p)
-	if err != nil {
-		t.Fatalf("fillInput: %v", err)
-	}
-	if in.BaseURL != "https://h.example.com" {
-		t.Fatalf("BaseURL = %q, want https default derived from host", in.BaseURL)
-	}
-}
-
-func TestRunReportsTestFailureNonFatally(t *testing.T) {
-	home := t.TempDir()
-	deps := Deps{
-		Keygen:  &fakeKeygen{},
-		Connect: func(config.Target) remote.CommandRunner { return fakeRunner{err: errors.New("connection refused")} },
-		HomeDir: homeDirFunc(home),
-	}
-	params := Params{
-		Input:       Input{Host: "h", BaseURL: "https://h", Root: "/srv/share"},
-		GenerateKey: true,
-		Test:        true,
-	}
-	res, err := Run(context.Background(), deps, params)
-	if err != nil {
-		t.Fatalf("Run returned error for failed test (should be non-fatal): %v", err)
-	}
-	if res.TestOK {
-		t.Fatal("TestOK = true, want false")
-	}
-	if !strings.Contains(res.TestErr, "connection refused") {
-		t.Fatalf("TestErr = %q", res.TestErr)
-	}
-	if _, err := os.Stat(res.ConfigPath); err != nil {
-		t.Fatal("config not written despite failed connectivity test")
-	}
-}
-
-func TestRunRefusesExistingConfig(t *testing.T) {
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, ".mason"), []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	deps := Deps{HomeDir: homeDirFunc(home)}
-	params := Params{Input: Input{Host: "h", BaseURL: "https://h", Root: "/srv/share"}}
-	if _, err := Run(context.Background(), deps, params); err == nil {
-		t.Fatal("Run err = nil, want refuse-overwrite")
-	}
-}
-
-func TestRunNudgesAwayFromRoot(t *testing.T) {
-	home := t.TempDir()
-	deps := Deps{HomeDir: homeDirFunc(home)}
-	params := Params{Input: Input{Host: "h", User: "root", BaseURL: "https://h", Root: "/srv/share"}}
-	res, err := Run(context.Background(), deps, params)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "root") {
-		t.Fatalf("warnings = %v, want a root nudge", res.Warnings)
+	if kg.calls != 0 || res.Bootstrapped || res.KeyPath != key || res.ConfigChanged {
+		t.Fatalf("res = %+v, keygen %d; want the configured key reused and nothing changed", res, kg.calls)
 	}
 }

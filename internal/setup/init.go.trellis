@@ -1,32 +1,41 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
-Feature: Project Init Scaffold
-  "Writes a valid project .mason config with deploy defaults for a new site."
+Feature: Project Init
+  "Writes the short project .mason (site URL + build folder) for a new site, detecting the build folder when one exists."
 
   Provides:
     - setup.InitProject @source("symbol:InitProject")
-    - setup.ProjectConfigTemplate @source("symbol:ProjectConfigTemplate")
+    - setup.InitInput @source("symbol:InitInput")
+    - setup.DetectBuildDir @source("symbol:DetectBuildDir")
 
   Consumes:
-    - config.Parse
+    - config.Load
+    - config.NewSite
 
   Invariants:
     - InitProject MUST refuse to overwrite an existing .mason file
-    - ProjectConfigTemplate MUST parse through config.Parse without error
+    - The written file MUST load through config.Load; on failure nothing MUST be left behind
+    - InitProject MUST write only site, build, and (when given) server — never derived values like the server path
+    - DetectBuildDir MUST return the first existing folder among dist, public, build, _site, out, or "" when none exists
 
   OutOfScope:
-    - Interactive onboarding wizard (owned by setup.go / setup.Run)
-    - Remote server bootstrap (remote-init, M-071)
+    - Provisioning the site on the server (cli init offers it; setup.ProvisionScript renders it)
+    - Machine onboarding (setup.Run)
 
   Scenario (happy-path): Scaffold new project
-    Given a directory without .mason
-    When InitProject runs
-    Then a valid YAML config is written
+    Given a directory with a dist/ folder and the URL https://blog.example.com
+    When InitProject runs with the detected build folder
+    Then .mason contains site: https://blog.example.com and build: dist
 
   Scenario (negative): Existing config
     Given .mason already exists
     When InitProject runs
     Then it returns an error without overwriting the file
+
+  Scenario (negative): Invalid URL
+    Given the URL https://example.com/blog
+    When InitProject runs
+    Then it fails explaining sites are served from the root of their host and writes nothing

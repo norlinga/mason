@@ -1,0 +1,37 @@
+@owner: mason
+@stability: stable
+@since: 2026-10-15
+@reviewed: 2026-10-15
+
+Feature: Share Store Provisioning Script
+  "Renders the idempotent admin script for the share store: the share tree (objects/, s/, private .mason/) and a Mason-managed vhost that serves links but 404s the private prefixes."
+
+  Provides:
+    - setup.ShareStoreParams @source("symbol:ShareStoreParams")
+    - setup.ShareStoreScript @source("symbol:ShareStoreScript")
+
+  Consumes:
+    - config.Share
+    - setup.SnippetPath
+    - setup.writeSnippetInstall
+    - setup.writeCaddyReloadBlock
+
+  Invariants:
+    - The share tree MUST be 2750 mason-owned with .mason/ at 700 so the manifest is never readable by Caddy
+    - The vhost MUST 404 /objects/* and /.mason/* and MUST NOT carry the general dotfile rule (share paths may be dotfiles)
+    - The snippet MUST be named by the share URL host and start with the managed marker
+    - The script MUST NOT create users, groups, or keys
+
+  OutOfScope:
+    - Server bootstrap (setup.BootstrapScript)
+    - Share link operations (internal/share, internal/links)
+
+  Scenario (happy-path): Share store
+    Given share https://files.example.com at /var/www/share
+    When ShareStoreScript renders
+    Then it creates the tree and mason.d/files.example.com.caddy with the private-prefix 404
+
+  Scenario (negative): Missing URL
+    Given a share without a URL
+    When ShareStoreScript renders
+    Then it returns an error and no script

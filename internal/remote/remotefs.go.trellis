@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Remote Filesystem over SSH
   "SSH-backed RemoteFS with safe Mason symlink writes and collision detection."
@@ -27,7 +27,7 @@ Feature: Remote Filesystem over SSH
   Invariants:
     - Mason MUST NOT overwrite non-symlink paths or user-owned symlinks not targeting objects/
     - Missing symlink paths MUST be allowed before write
-    - RemotePath MUST join target root with site-relative paths using forward slashes
+    - RemotePath MUST join the store root with site-relative paths using forward slashes
 
   OutOfScope:
     - Manifest read/write (owned by the manifest store)

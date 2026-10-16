@@ -20,9 +20,7 @@ func rootOptionsFromCommand(cmd *cobra.Command) rootOptions {
 	str := func(name string) string { v, _ := flags.GetString(name); return v }
 	boolean := func(name string) bool { v, _ := flags.GetBool(name); return v }
 	return rootOptions{
-		target:  str("target"),
 		json:    boolean("json"),
-		dryRun:  boolean("dry-run"),
 		yes:     boolean("yes"),
 		quiet:   boolean("quiet"),
 		verbose: boolean("verbose"),
@@ -35,62 +33,60 @@ func outputOptions(root rootOptions) output.Options {
 	return output.Options{JSON: root.json, Quiet: root.quiet, Verbose: root.verbose}
 }
 
-// resolveTarget loads config (explicit --config or discovered .mason) and selects
-// the target named by --target, or the configured default.
-func resolveTarget(root rootOptions) (config.ResolvedTarget, error) {
-	path := root.config
-	if path == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return config.ResolvedTarget{}, err
-		}
-		path, err = config.Discover(cwd)
-		if err != nil {
-			return config.ResolvedTarget{}, err
-		}
-	}
-	cfg, err := config.LoadFile(path)
+// loadConfig loads ~/.mason merged with the nearest project .mason (or --config).
+func loadConfig(root rootOptions) (*config.Config, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return config.ResolvedTarget{}, err
+		return nil, err
 	}
-	return cfg.ResolveTarget(root.target)
+	return config.Load(config.LoadOptions{Dir: cwd, ProjectFile: root.config})
 }
 
-// remoteStack bundles the remote services a command composes for a target.
+// remoteStack bundles the remote services the share commands compose for the share store.
 type remoteStack struct {
-	target config.Target
-	fs     remote.RemoteFS
-	store  remote.ManifestStore
-	rsync  *remote.Rsync
-	links  *links.Service
-	cache  *remote.LocalCache
+	share config.Share
+	// cacheID keys the local manifest cache: the share store's host.
+	cacheID string
+	fs      remote.RemoteFS
+	store   remote.ManifestStore
+	rsync   *remote.Rsync
+	links   *links.Service
+	cache   *remote.LocalCache
 }
 
-// newRemoteStack wires the SSH-backed remote services for a resolved target. It
-// performs no I/O; connections are established lazily on first use.
-func newRemoteStack(resolved config.ResolvedTarget) (remoteStack, error) {
-	target := resolved.Target
-	ssh := remote.NewSSH(remote.SSHOptionsFromTarget(target))
+// shareStack resolves the share store from ~/.mason and wires its remote services. It
+// performs no I/O beyond reading config; connections are made on first use.
+func shareStack(root rootOptions) (remoteStack, error) {
+	cfg, err := loadConfig(root)
+	if err != nil {
+		return remoteStack{}, err
+	}
+	share, err := cfg.RequireShare()
+	if err != nil {
+		return remoteStack{}, err
+	}
+	ssh := remote.NewSSH(remote.SSHOptionsFromServer(*share.Server))
 	fs := remote.NewSSHFS(ssh)
-	store := remote.NewRemoteManifestStore(target.Root, fs, ssh)
+	store := remote.NewRemoteManifestStore(share.Path, fs, ssh)
 	cache, err := remote.NewLocalCache()
 	if err != nil {
 		return remoteStack{}, err
 	}
 	return remoteStack{
-		target: target,
-		fs:     fs,
-		store:  store,
-		rsync:  remote.NewRsync(),
-		links:  links.NewService(target.Root, fs, store),
-		cache:  cache,
+		share:   share,
+		cacheID: share.Host,
+		fs:      fs,
+		store:   store,
+		rsync:   remote.NewRsync(),
+		links:   links.NewService(share.Path, fs, store),
+		cache:   cache,
 	}, nil
 }
 
 // remoteSync runs a best-effort cache reconcile for read commands, discarding
 // divergence warnings (the sync command is where those surface).
-func remoteSync(ctx context.Context, stack remoteStack, targetID string) (remote.SyncResult, error) {
-	return remote.Sync(ctx, stack.store, stack.cache, targetID, io.Discard)
+func remoteSync(ctx context.Context, stack remoteStack, cacheID string) (remote.SyncResult, error) {
+	return remote.Sync(ctx, stack.store, stack.cache, cacheID, io.Discard)
 }
 
 // emitError renders err to the user: a JSON failure envelope on stdout under

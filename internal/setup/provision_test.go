@@ -7,38 +7,33 @@ import (
 	"github.com/norlinga/mason/internal/config"
 )
 
-func staticTarget() config.Target {
-	return config.Target{
-		Host:    "vps.example.net",
-		User:    "mason",
-		Root:    "/var/www/blog.example.com",
-		BaseURL: "https://blog.example.com",
-		Deploy:  config.DeployConfig{RemotePath: "/var/www/blog.example.com"},
+func staticSite() config.Site {
+	return config.Site{
+		Name:   "blog.example.com",
+		URL:    "https://blog.example.com",
+		Host:   "blog.example.com",
+		Path:   "/var/www/blog.example.com",
+		Server: &config.Server{User: "mason", Host: "vps.example.net"},
 	}
 }
 
-func staticParams() SiteInitParams {
-	return SiteInitParams{
-		Target:     staticTarget(),
-		TargetName: "home",
-		Reload:     true,
-	}
+func staticParams() ProvisionParams {
+	return ProvisionParams{Site: staticSite(), Reload: true}
 }
 
-// apexParams returns params for an apex-domain target (example.com), the
-// generic counterpart to the subdomain staticParams (blog.example.com).
-func apexParams() SiteInitParams {
+// apexParams returns params for an apex-domain site (example.com), the generic
+// counterpart to the subdomain staticParams (blog.example.com).
+func apexParams() ProvisionParams {
 	p := staticParams()
-	p.Target.Root = "/var/www/example.com"
-	p.Target.BaseURL = "https://example.com"
-	p.Target.Deploy.RemotePath = "/var/www/example.com"
+	p.Site.URL, p.Site.Host, p.Site.Name = "https://example.com", "example.com", "example.com"
+	p.Site.Path = "/var/www/example.com"
 	return p
 }
 
-func TestSiteInitScriptInvariants(t *testing.T) {
-	script, err := SiteInitScript(staticParams())
+func TestProvisionScriptInvariants(t *testing.T) {
+	script, err := ProvisionScript(staticParams())
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 
 	wantContains := []string{
@@ -49,14 +44,15 @@ func TestSiteInitScriptInvariants(t *testing.T) {
 		// caddy reads via group
 		"usermod -aG \"$MASON_GROUP\" \"$CADDY_USER\"",
 		// plain static vhost
-		"blog.example.com {",
+		"https://blog.example.com {",
 		"file_server",
 		// dotfiles are never served, but /.well-known/ stays public
 		"\t@mason_hidden {\n\t\tpath */.*\n\t\tnot path /.well-known/*\n\t}\n\trespond @mason_hidden 404\n\tfile_server\n",
 		// single import line, idempotent
 		"grep -qF 'import /etc/caddy/mason.d/*.caddy' \"$CADDYFILE\" 2>/dev/null ||",
-		// snippet written to per-target file
-		"cat > '/etc/caddy/mason.d/home.caddy' <<'CADDY'",
+		// snippet named by the site host, managed marker first
+		"SNIPPET_FILE='/etc/caddy/mason.d/blog.example.com.caddy'",
+		"cat > \"$SNIPPET_FILE.mason-new\" <<'CADDY'\n# managed by mason\n",
 		// reload guarded by validate
 		"caddy validate --config \"$CADDYFILE\"",
 		"systemctl reload caddy",
@@ -83,43 +79,43 @@ func TestSiteInitScriptInvariants(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptDeterministic(t *testing.T) {
-	a, err := SiteInitScript(staticParams())
+func TestProvisionScriptDeterministic(t *testing.T) {
+	a, err := ProvisionScript(staticParams())
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	b, err := SiteInitScript(staticParams())
+	b, err := ProvisionScript(staticParams())
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	if a != b {
-		t.Fatal("SiteInitScript is not deterministic for identical input")
+		t.Fatal("ProvisionScript is not deterministic for identical input")
 	}
 }
 
-func TestSiteInitScriptSPA(t *testing.T) {
+func TestProvisionScriptSPA(t *testing.T) {
 	p := staticParams()
 	p.SPA = true
-	script, err := SiteInitScript(p)
+	script, err := ProvisionScript(p)
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if !strings.Contains(script, "try_files {path} /index.html") {
 		t.Fatalf("--spa missing try_files fallback\n%s", script)
 	}
 
-	plain, _ := SiteInitScript(staticParams())
+	plain, _ := ProvisionScript(staticParams())
 	if strings.Contains(plain, "try_files") {
 		t.Fatalf("non-spa script must not emit try_files\n%s", plain)
 	}
 }
 
-func TestSiteInitScriptNoReload(t *testing.T) {
+func TestProvisionScriptNoReload(t *testing.T) {
 	p := staticParams()
 	p.Reload = false
-	script, err := SiteInitScript(p)
+	script, err := ProvisionScript(p)
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if strings.Contains(script, "if [ \"$CADDY_GROUP_CHANGED\" -eq 1 ]; then") {
 		t.Fatal("no-reload still emits an active apply block")
@@ -129,10 +125,10 @@ func TestSiteInitScriptNoReload(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptRestartsWhenGroupChanges(t *testing.T) {
-	script, err := SiteInitScript(staticParams()) // Reload: true
+func TestProvisionScriptRestartsWhenGroupChanges(t *testing.T) {
+	script, err := ProvisionScript(staticParams()) // Reload: true
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	for _, want := range []string{
 		"CADDY_GROUP_CHANGED=1",
@@ -146,63 +142,37 @@ func TestSiteInitScriptRestartsWhenGroupChanges(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptHostOverride(t *testing.T) {
+func TestProvisionScriptRequiresRoot(t *testing.T) {
 	p := staticParams()
-	p.Target.BaseURL = "" // force reliance on the override
-	p.Host = "staging.example.com"
-	script, err := SiteInitScript(p)
-	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
-	}
-	if !strings.Contains(script, "staging.example.com {") {
-		t.Fatalf("--host override not used as site address\n%s", script)
-	}
-}
-
-func TestSiteInitScriptRootOverride(t *testing.T) {
-	p := staticParams()
-	p.Target.Deploy.RemotePath = "" // force reliance on the override
-	p.Root = "/srv/custom"
-	script, err := SiteInitScript(p)
-	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
-	}
-	if !strings.Contains(script, "SITE_ROOT='/srv/custom'") {
-		t.Fatalf("--root override not used as web root\n%s", script)
-	}
-}
-
-func TestSiteInitScriptRequiresRoot(t *testing.T) {
-	p := staticParams()
-	p.Target.Deploy.RemotePath = ""
-	if _, err := SiteInitScript(p); err == nil {
+	p.Site.Path = ""
+	if _, err := ProvisionScript(p); err == nil {
 		t.Fatal("missing web root err = nil, want error")
 	}
 }
 
-func TestSiteInitScriptRequiresHost(t *testing.T) {
+func TestProvisionScriptRequiresHost(t *testing.T) {
 	p := staticParams()
-	p.Target.BaseURL = ""
-	if _, err := SiteInitScript(p); err == nil {
+	p.Site.URL, p.Site.Host = "", ""
+	if _, err := ProvisionScript(p); err == nil {
 		t.Fatal("missing site address err = nil, want error")
 	}
 }
 
-func TestSiteInitScriptSubdomainNoRedirect(t *testing.T) {
+func TestProvisionScriptSubdomainNoRedirect(t *testing.T) {
 	// A subdomain must stay a single plain block with no www handling.
-	script, err := SiteInitScript(staticParams())
+	script, err := ProvisionScript(staticParams())
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if strings.Contains(script, "redir") || strings.Contains(script, "www.") {
 		t.Fatalf("subdomain script must not emit a www redirect\n%s", script)
 	}
 }
 
-func TestSiteInitScriptApexDomain(t *testing.T) {
-	script, err := SiteInitScript(apexParams())
+func TestProvisionScriptApexDomain(t *testing.T) {
+	script, err := ProvisionScript(apexParams())
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	for _, want := range []string{
 		"https://example.com {",
@@ -216,14 +186,14 @@ func TestSiteInitScriptApexDomain(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptApexNormalizesWWW(t *testing.T) {
+func TestProvisionScriptApexNormalizesWWW(t *testing.T) {
 	// A base_url that already carries www should still serve the bare apex and
 	// redirect www → apex (not serve www and redirect apex → www).
 	p := apexParams()
-	p.Target.BaseURL = "https://www.example.com"
-	script, err := SiteInitScript(p)
+	p.Site.URL, p.Site.Host = "https://www.example.com", "www.example.com"
+	script, err := ProvisionScript(p)
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if !strings.Contains(script, "https://example.com {\n\troot * /var/www/example.com") {
 		t.Fatalf("www base_url should serve the bare apex\n%s", script)
@@ -233,12 +203,12 @@ func TestSiteInitScriptApexNormalizesWWW(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptApexNoWWW(t *testing.T) {
+func TestProvisionScriptApexNoWWW(t *testing.T) {
 	p := apexParams()
 	p.NoWWW = true
-	script, err := SiteInitScript(p)
+	script, err := ProvisionScript(p)
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if strings.Contains(script, "redir") || strings.Contains(script, "www.example.com") {
 		t.Fatalf("--no-www must omit the redirect block\n%s", script)
@@ -248,11 +218,11 @@ func TestSiteInitScriptApexNoWWW(t *testing.T) {
 	}
 }
 
-func TestSiteInitScriptDomainModeOverride(t *testing.T) {
+func TestProvisionScriptDomainModeOverride(t *testing.T) {
 	// Force apex on a subdomain host: redirect appears.
 	p := staticParams()
 	p.DomainMode = "apex"
-	script, err := SiteInitScript(p)
+	script, err := ProvisionScript(p)
 	if err != nil {
 		t.Fatalf("apex override: %v", err)
 	}
@@ -263,7 +233,7 @@ func TestSiteInitScriptDomainModeOverride(t *testing.T) {
 	// Force subdomain on an apex host: no redirect.
 	p = apexParams()
 	p.DomainMode = "subdomain"
-	script, err = SiteInitScript(p)
+	script, err = ProvisionScript(p)
 	if err != nil {
 		t.Fatalf("subdomain override: %v", err)
 	}
@@ -291,12 +261,12 @@ func TestIsApexDomain(t *testing.T) {
 	}
 }
 
-func TestSiteInitGroupDefault(t *testing.T) {
+func TestProvisionGroupDefault(t *testing.T) {
 	p := staticParams()
-	p.Target.User = "publisher"
-	script, err := SiteInitScript(p)
+	p.Site.Server.User = "publisher"
+	script, err := ProvisionScript(p)
 	if err != nil {
-		t.Fatalf("SiteInitScript: %v", err)
+		t.Fatalf("ProvisionScript: %v", err)
 	}
 	if !strings.Contains(script, "MASON_USER='publisher'") || !strings.Contains(script, "MASON_GROUP='publisher'") {
 		t.Fatalf("user/group not defaulted together\n%s", script)

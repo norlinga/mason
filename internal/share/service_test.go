@@ -72,13 +72,13 @@ func (l *fakeLinker) EnsureShare(_ context.Context, req links.ShareRequest) (lin
 	return l.result, nil
 }
 
-func testTarget() config.Target {
-	return config.Target{
-		Host:    "host.example",
-		User:    "mason",
-		Root:    "/srv/share",
-		BaseURL: "https://share.example.com",
-		Share:   config.ShareConfig{DefaultPath: "inbox/"},
+func testShare() config.Share {
+	return config.Share{
+		URL:    "https://share.example.com",
+		Host:   "share.example.com",
+		Path:   "/srv/share",
+		Inbox:  "inbox/",
+		Server: &config.Server{User: "mason", Host: "host.example"},
 	}
 }
 
@@ -109,7 +109,7 @@ func TestShareUploadsWhenBlobMissing(t *testing.T) {
 	store := &fakeStore{manifest: domain.NewManifest()}
 	uploader := &fakeUploader{}
 	linker := &fakeLinker{result: linkResult("demos/test.mp3", "abc123", ".mp3")}
-	svc := NewService(testTarget(), fs, store, uploader, linker)
+	svc := NewService(testShare(), fs, store, uploader, linker)
 
 	res, err := svc.Share(context.Background(), Request{File: file, As: "demos/test.mp3"})
 	if err != nil {
@@ -164,7 +164,7 @@ func TestShareSkipsUploadWhenBlobPresent(t *testing.T) {
 	store := &fakeStore{manifest: manifest}
 	uploader := &fakeUploader{}
 	linker := &fakeLinker{result: linkResult("demos/test.mp3", "abc123", ".mp3")}
-	svc := NewService(testTarget(), fs, store, uploader, linker)
+	svc := NewService(testShare(), fs, store, uploader, linker)
 
 	res, err := svc.Share(context.Background(), Request{File: file, As: "demos/test.mp3"})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestShareUsesDefaultPathWhenNoAs(t *testing.T) {
 	file := writeFile(t, "hello")
 	store := &fakeStore{manifest: domain.NewManifest()}
 	linker := &fakeLinker{result: linkResult("inbox/foo.mp3", "abc123", ".mp3")}
-	svc := NewService(testTarget(), &fakeFS{}, store, &fakeUploader{}, linker)
+	svc := NewService(testShare(), &fakeFS{}, store, &fakeUploader{}, linker)
 
 	if _, err := svc.Share(context.Background(), Request{File: file}); err != nil {
 		t.Fatalf("Share: %v", err)
@@ -196,7 +196,7 @@ func TestShareUsesDefaultPathWhenNoAs(t *testing.T) {
 }
 
 func TestShareMissingFile(t *testing.T) {
-	svc := NewService(testTarget(), &fakeFS{}, &fakeStore{manifest: domain.NewManifest()}, &fakeUploader{}, &fakeLinker{})
+	svc := NewService(testShare(), &fakeFS{}, &fakeStore{manifest: domain.NewManifest()}, &fakeUploader{}, &fakeLinker{})
 	if _, err := svc.Share(context.Background(), Request{File: "/no/such/file.mp3", As: "x.mp3"}); err == nil {
 		t.Fatal("Share err = nil for missing file, want error")
 	}
@@ -206,7 +206,7 @@ func TestShareUploadErrorPropagates(t *testing.T) {
 	file := writeFile(t, "hello")
 	store := &fakeStore{manifest: domain.NewManifest()}
 	uploader := &fakeUploader{err: errors.New("rsync failed")}
-	svc := NewService(testTarget(), &fakeFS{}, store, uploader, &fakeLinker{})
+	svc := NewService(testShare(), &fakeFS{}, store, uploader, &fakeLinker{})
 
 	if _, err := svc.Share(context.Background(), Request{File: file, As: "demos/test.mp3"}); err == nil {
 		t.Fatal("Share err = nil on upload failure, want error")
@@ -222,7 +222,7 @@ func TestShareLinkerErrorPropagates(t *testing.T) {
 	manifest.Blobs[helloBlob] = domain.Blob{Size: 5}
 	store := &fakeStore{manifest: manifest}
 	linker := &fakeLinker{err: errors.New("link failed")}
-	svc := NewService(testTarget(), &fakeFS{}, store, &fakeUploader{}, linker)
+	svc := NewService(testShare(), &fakeFS{}, store, &fakeUploader{}, linker)
 
 	if _, err := svc.Share(context.Background(), Request{File: file, As: "demos/test.mp3"}); err == nil {
 		t.Fatal("Share err = nil on linker failure, want error")

@@ -148,23 +148,23 @@ func TestLocalCacheRejectsEmptyRoot(t *testing.T) {
 func TestLocalCacheRejectsBadTargetID(t *testing.T) {
 	cache := NewLocalCacheAt(t.TempDir())
 	tests := []struct {
-		name     string
-		targetID string
+		name    string
+		cacheID string
 	}{
-		{name: "empty", targetID: ""},
-		{name: "whitespace", targetID: "   "},
-		{name: "surrounding whitespace", targetID: " prod "},
-		{name: "path separator", targetID: "a/b"},
-		{name: "parent traversal", targetID: ".."},
-		{name: "dot", targetID: "."},
+		{name: "empty", cacheID: ""},
+		{name: "whitespace", cacheID: "   "},
+		{name: "surrounding whitespace", cacheID: " prod "},
+		{name: "path separator", cacheID: "a/b"},
+		{name: "parent traversal", cacheID: ".."},
+		{name: "dot", cacheID: "."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := cache.ManifestPath(tt.targetID); err == nil {
-				t.Fatalf("ManifestPath(%q) err = nil, want error", tt.targetID)
+			if _, err := cache.ManifestPath(tt.cacheID); err == nil {
+				t.Fatalf("ManifestPath(%q) err = nil, want error", tt.cacheID)
 			}
-			if err := cache.Write(tt.targetID, sampleManifest()); err == nil {
-				t.Fatalf("Write(%q) err = nil, want error", tt.targetID)
+			if err := cache.Write(tt.cacheID, sampleManifest()); err == nil {
+				t.Fatalf("Write(%q) err = nil, want error", tt.cacheID)
 			}
 		})
 	}

@@ -19,9 +19,7 @@ func TestRootHelpListsGlobalFlags(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"--target",
 		"--json",
-		"--dry-run",
 		"--yes",
 		"--quiet",
 		"--verbose",
@@ -29,6 +27,26 @@ func TestRootHelpListsGlobalFlags(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRootHelpDropsV1Surface(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := NewRootCommand(&stdout, &stderr)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute help: %v", err)
+	}
+	out := stdout.String()
+	for _, gone := range []string{"--target", "remote-init", "site-init", "  target "} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("help still mentions %q:\n%s", gone, out)
+		}
+	}
+	for _, want := range []string{"setup", "init", "provision", "deploy", "key", "doctor", "share"} {
+		if !strings.Contains(out, "  "+want+" ") {
+			t.Fatalf("help missing command %q:\n%s", want, out)
 		}
 	}
 }

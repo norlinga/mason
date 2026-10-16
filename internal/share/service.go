@@ -28,7 +28,7 @@ type Linker interface {
 
 // Service publishes local files as shares.
 type Service struct {
-	target   config.Target
+	share    config.Share
 	fs       remote.RemoteFS
 	store    remote.ManifestStore
 	uploader Uploader
@@ -38,10 +38,10 @@ type Service struct {
 	now      func() time.Time
 }
 
-// NewService builds a share service for a resolved target.
-func NewService(target config.Target, fs remote.RemoteFS, store remote.ManifestStore, uploader Uploader, linker Linker) *Service {
+// NewService builds a share service for the configured share store.
+func NewService(share config.Share, fs remote.RemoteFS, store remote.ManifestStore, uploader Uploader, linker Linker) *Service {
 	return &Service{
-		target:   target,
+		share:    share,
 		fs:       fs,
 		store:    store,
 		uploader: uploader,
@@ -55,7 +55,7 @@ func NewService(target config.Target, fs remote.RemoteFS, store remote.ManifestS
 type Request struct {
 	// File is the local path to publish.
 	File string
-	// As is the raw --as value (may be empty to use the target's default path).
+	// As is the raw --as value (may be empty to use the share store's inbox).
 	As string
 }
 
@@ -79,7 +79,7 @@ func (s *Service) Share(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("file is required")
 	}
 
-	objectPath, err := domain.ResolveSharePath(req.As, s.target.Share.DefaultPath, filepath.Base(file))
+	objectPath, err := domain.ResolveSharePath(req.As, s.share.Inbox, filepath.Base(file))
 	if err != nil {
 		return Result{}, err
 	}
@@ -106,12 +106,12 @@ func (s *Service) Share(ctx context.Context, req Request) (Result, error) {
 		ObjectPath: objectPath,
 		Hash:       blob,
 		Size:       size,
-		LongURL:    domain.ObjectURL(s.target.BaseURL, objectPath),
+		LongURL:    domain.ObjectURL(s.share.URL, objectPath),
 	}
 	if share.Slug != nil {
 		result.Slug = share.Slug.Value
 		result.Ext = share.Slug.Ext
-		result.ShortURL = domain.SlugURL(s.target.BaseURL, share.Slug.Value, share.Slug.Ext)
+		result.ShortURL = domain.SlugURL(s.share.URL, share.Slug.Value, share.Slug.Ext)
 	}
 	return result, nil
 }
@@ -131,18 +131,18 @@ func (s *Service) ensureBlob(ctx context.Context, file, blob string, size int64)
 	if err != nil {
 		return false, err
 	}
-	blobRemote := remote.RemotePath(s.target.Root, blobRel)
+	blobRemote := remote.RemotePath(s.share.Path, blobRel)
 
 	if dir := filepath.ToSlash(filepath.Dir(blobRel)); dir != "." && dir != "/" {
-		if err := s.fs.MkdirAll(ctx, remote.RemotePath(s.target.Root, dir)); err != nil {
+		if err := s.fs.MkdirAll(ctx, remote.RemotePath(s.share.Path, dir)); err != nil {
 			return false, fmt.Errorf("create blob dir: %w", err)
 		}
 	}
 
-	sshOpts := remote.SSHOptionsFromTarget(s.target)
+	sshOpts := remote.SSHOptionsFromServer(*s.share.Server)
 	_, err = s.uploader.Upload(ctx, remote.RsyncRequest{
 		Source:      file,
-		Destination: remote.RsyncDestinationFromTarget(s.target, blobRemote),
+		Destination: remote.RsyncDestination(sshOpts, blobRemote),
 		SSH:         &sshOpts,
 	})
 	if err != nil {

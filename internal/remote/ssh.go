@@ -1,33 +1,121 @@
 package remote
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/norlinga/mason/internal/config"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
-	defaultSSHPort    = 22
-	defaultSSHTimeout = 30 * time.Second
+	defaultSSHBinary      = "ssh"
+	defaultConnectTimeout = 15 // seconds
+	controlPersist        = "60s"
+	sshConnectFailure     = 255
 )
 
-// SSHOptions contains the connection settings needed to run remote commands.
+// SSHOptions are the settings for reaching a server through the system ssh client. Zero
+// values are left out of the ssh invocation so ~/.ssh/config can supply them.
 type SSHOptions struct {
 	Host    string
 	User    string
 	Port    int
 	KeyPath string
-	Timeout time.Duration
+	// ControlDir enables connection multiplexing with sockets in this directory.
+	ControlDir string
+	// AcceptNewHostKey trusts a host key on first contact (accept-new); only setup sets it.
+	AcceptNewHostKey bool
+}
+
+// SSHOptionsFromServer builds options for a configured server, multiplexing connections
+// through a socket directory under the user cache dir.
+func SSHOptionsFromServer(server config.Server) SSHOptions {
+	opts := SSHOptions{Host: server.Host, User: server.User, Port: server.Port, KeyPath: server.Key}
+	opts.ControlDir = controlDir()
+	return opts
+}
+
+// maxControlDirLen keeps ControlPath (<dir>/<40-hex %C>) plus the 17-byte temporary
+// suffix OpenSSH adds while binding under the smallest unix socket limit (104 bytes).
+const maxControlDirLen = 104 - 1 - 40 - 17 - 1
+
+// controlDir picks a socket directory short enough for a unix socket path: the user
+// cache dir, else a per-user directory in /tmp, else "" (no multiplexing).
+func controlDir() string {
+	if cache, err := os.UserCacheDir(); err == nil {
+		if dir := filepath.Join(cache, "mason", "ssh"); len(dir) <= maxControlDirLen {
+			return dir
+		}
+	}
+	if dir := filepath.Join("/tmp", fmt.Sprintf("mason-%d", os.Getuid())); len(dir) <= maxControlDirLen {
+		return dir
+	}
+	return ""
+}
+
+// Args returns the ssh options (everything before the destination). rsync's -e transport
+// uses the same list so both paths authenticate and verify hosts identically.
+func (o SSHOptions) Args() []string {
+	args := []string{
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=" + strconv.Itoa(defaultConnectTimeout),
+	}
+	if o.AcceptNewHostKey {
+		args = append(args, "-o", "StrictHostKeyChecking=accept-new")
+	}
+	if o.Port != 0 {
+		args = append(args, "-p", strconv.Itoa(o.Port))
+	}
+	if key := strings.TrimSpace(o.KeyPath); key != "" {
+		if expanded, err := expandHome(key); err == nil {
+			key = expanded
+		}
+		args = append(args, "-i", key, "-o", "IdentitiesOnly=yes")
+	}
+	if o.ControlDir != "" {
+		args = append(args,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath="+filepath.Join(o.ControlDir, "%C"),
+			"-o", "ControlPersist="+controlPersist,
+		)
+	}
+	return args
+}
+
+// Destination renders user@host for ssh.
+func (o SSHOptions) Destination() string {
+	if o.User == "" {
+		return o.Host
+	}
+	return o.User + "@" + o.Host
+}
+
+// rsyncHost renders the host part of an rsync remote spec, bracketing IPv6 literals.
+func (o SSHOptions) rsyncHost() string {
+	host := o.Host
+	if ip := net.ParseIP(host); ip != nil && strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if o.User == "" {
+		return host
+	}
+	return o.User + "@" + host
+}
+
+func (o SSHOptions) prepare() error {
+	if o.ControlDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(o.ControlDir, 0o700); err != nil {
+		return fmt.Errorf("create ssh control dir: %w", err)
+	}
+	return nil
 }
 
 // CommandResult captures remote command output.
@@ -37,211 +125,113 @@ type CommandResult struct {
 	ExitCode int
 }
 
-// CommandRunner runs shell commands on a remote target.
+// CommandRunner runs shell commands on a remote server.
 type CommandRunner interface {
 	Run(ctx context.Context, command string) (CommandResult, error)
 }
 
-// SSH runs commands over SSH.
+// ConnectError reports that ssh could not reach or authenticate to the server.
+type ConnectError struct {
+	Destination string
+	Reason      string
+	Detail      string
+}
+
+func (e *ConnectError) Error() string {
+	return fmt.Sprintf("ssh %s: %s", e.Destination, e.Reason)
+}
+
+// SSH runs commands through the system ssh binary.
 type SSH struct {
 	options SSHOptions
-	dialer  SSHDialer
+	binary  string
+	runner  ProcessRunner
 }
 
-// SSHDialer connects to an SSH server. It is injectable for tests.
-type SSHDialer interface {
-	Dial(ctx context.Context, network, address string, config *ssh.ClientConfig) (SSHClient, error)
-}
-
-// SSHClient is the subset of ssh.Client used by this package.
-type SSHClient interface {
-	NewSession() (SSHSession, error)
-	Close() error
-}
-
-// SSHSession is the subset of ssh.Session used by this package.
-type SSHSession interface {
-	Run(command string) error
-	Close() error
-	SetStdout(io.Writer)
-	SetStderr(io.Writer)
-}
-
-// SSHOptionsFromTarget converts a configured target into SSH options.
-func SSHOptionsFromTarget(target config.Target) SSHOptions {
-	return SSHOptions{
-		Host:    target.Host,
-		User:    target.User,
-		Port:    target.Port,
-		KeyPath: target.KeyPath,
-		Timeout: defaultSSHTimeout,
-	}
-}
-
-// NewSSH creates a real SSH command runner.
+// NewSSH creates a runner that shells out to ssh.
 func NewSSH(options SSHOptions) *SSH {
-	return NewSSHWithDialer(options, netSSHDialer{})
+	return NewSSHWithRunner(options, defaultSSHBinary, execProcessRunner{})
 }
 
-// NewSSHWithDialer creates an SSH command runner with an injected dialer.
-func NewSSHWithDialer(options SSHOptions, dialer SSHDialer) *SSH {
-	return &SSH{
-		options: options,
-		dialer:  dialer,
+// NewSSHWithRunner creates a runner with an injected process runner (tests).
+func NewSSHWithRunner(options SSHOptions, binary string, runner ProcessRunner) *SSH {
+	if strings.TrimSpace(binary) == "" {
+		binary = defaultSSHBinary
 	}
+	return &SSH{options: options, binary: binary, runner: runner}
 }
 
-// Run executes command on the remote host and returns captured output.
+// Run executes command on the server and returns its output and exit code.
 func (s *SSH) Run(ctx context.Context, command string) (CommandResult, error) {
 	if strings.TrimSpace(command) == "" {
-		return CommandResult{ExitCode: -1}, fmt.Errorf("remote command is required")
+		return CommandResult{ExitCode: -1}, errors.New("remote command is required")
 	}
-
-	clientConfig, err := s.clientConfig()
-	if err != nil {
+	if strings.TrimSpace(s.options.Host) == "" {
+		return CommandResult{ExitCode: -1}, errors.New("ssh host is required")
+	}
+	if err := s.options.prepare(); err != nil {
 		return CommandResult{ExitCode: -1}, err
 	}
 
-	client, err := s.dialer.Dial(ctx, "tcp", s.address(), clientConfig)
-	if err != nil {
-		return CommandResult{ExitCode: -1}, fmt.Errorf("connect ssh %s: %w", s.address(), err)
+	args := append(s.options.Args(), "--", s.options.Destination(), command)
+	res, err := s.runner.Run(ctx, s.binary, args, nil)
+	result := CommandResult{Stdout: res.Stdout, Stderr: res.Stderr, ExitCode: res.ExitCode}
+	if err == nil {
+		return result, nil
 	}
-	defer client.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		return CommandResult{ExitCode: -1}, fmt.Errorf("open ssh session: %w", err)
+	if res.ExitCode == sshConnectFailure || res.ExitCode < 0 {
+		result.ExitCode = -1
+		return result, connectError(s.options.Destination(), res.Stderr, err)
 	}
-	defer session.Close()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	session.SetStdout(&stdout)
-	session.SetStderr(&stderr)
-
-	err = session.Run(command)
-	result := CommandResult{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode(err),
-	}
-	if err != nil {
-		return result, fmt.Errorf("run remote command %q: %w", command, err)
-	}
-	return result, nil
+	return result, fmt.Errorf("remote command exited %d", res.ExitCode)
 }
 
-func (s *SSH) clientConfig() (*ssh.ClientConfig, error) {
-	if strings.TrimSpace(s.options.User) == "" {
-		return nil, fmt.Errorf("ssh user is required")
+// connectError turns ssh's stderr into one actionable line.
+func connectError(dest, stderr string, err error) *ConnectError {
+	detail := strings.TrimSpace(stderr)
+	reasons := []struct{ match, reason string }{
+		{"Host key verification failed", "host key is unknown or changed — run 'mason setup " + hostOf(dest) + "' to trust it, or check known_hosts"},
+		{"REMOTE HOST IDENTIFICATION HAS CHANGED", "host key changed — verify the server, then fix ~/.ssh/known_hosts"},
+		{"Permission denied", "permission denied — this machine's key is not authorized for " + dest + " (run 'mason setup " + hostOf(dest) + "')"},
+		{"Could not resolve hostname", "cannot resolve host " + hostOf(dest)},
+		{"Connection refused", "connection refused by " + hostOf(dest)},
+		{"timed out", "connection timed out"},
+		{"No route to host", "no route to host " + hostOf(dest)},
 	}
-	signer, err := signerFromKeyPath(s.options.KeyPath)
-	if err != nil {
-		return nil, err
+	for _, r := range reasons {
+		if strings.Contains(detail, r.match) {
+			return &ConnectError{Destination: dest, Reason: r.reason, Detail: detail}
+		}
 	}
-	timeout := s.options.Timeout
-	if timeout == 0 {
-		timeout = defaultSSHTimeout
+	if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "executable file not found") {
+		return &ConnectError{Destination: dest, Reason: "ssh is not installed or not on PATH", Detail: err.Error()}
 	}
-	return &ssh.ClientConfig{
-		User:            s.options.User,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         timeout,
-	}, nil
+	reason := lastLine(detail)
+	if reason == "" {
+		reason = err.Error()
+	}
+	return &ConnectError{Destination: dest, Reason: reason, Detail: detail}
 }
 
-func (s *SSH) address() string {
-	port := s.options.Port
-	if port == 0 {
-		port = defaultSSHPort
+func hostOf(dest string) string {
+	if i := strings.LastIndex(dest, "@"); i >= 0 {
+		return dest[i+1:]
 	}
-	return net.JoinHostPort(s.options.Host, strconv.Itoa(port))
+	return dest
 }
 
-func signerFromKeyPath(path string) (ssh.Signer, error) {
-	if strings.TrimSpace(path) == "" {
-		path = "~/.ssh/id_ed25519"
-	}
-	expanded, err := expandHome(path)
-	if err != nil {
-		return nil, err
-	}
-	key, err := os.ReadFile(expanded)
-	if err != nil {
-		return nil, fmt.Errorf("read ssh key %q: %w", expanded, err)
-	}
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("parse ssh key %q: %w", expanded, err)
-	}
-	return signer, nil
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func expandHome(path string) (string, error) {
-	if path == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		return home, nil
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
 	}
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
-	}
-	return path, nil
-}
-
-func exitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if exitErr, ok := err.(*ssh.ExitError); ok {
-		return exitErr.ExitStatus()
-	}
-	return -1
-}
-
-type netSSHDialer struct{}
-
-func (d netSSHDialer) Dial(ctx context.Context, network, address string, config *ssh.ClientConfig) (SSHClient, error) {
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, network, address)
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	clientConn, chans, reqs, err := ssh.NewClientConn(conn, address, config)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return sshClient{Client: ssh.NewClient(clientConn, chans, reqs)}, nil
-}
-
-type sshClient struct {
-	*ssh.Client
-}
-
-func (c sshClient) NewSession() (SSHSession, error) {
-	session, err := c.Client.NewSession()
-	if err != nil {
-		return nil, err
-	}
-	return sshSession{Session: session}, nil
-}
-
-type sshSession struct {
-	*ssh.Session
-}
-
-func (s sshSession) SetStdout(w io.Writer) {
-	s.Stdout = w
-}
-
-func (s sshSession) SetStderr(w io.Writer) {
-	s.Stderr = w
+	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/")), nil
 }

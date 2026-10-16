@@ -59,13 +59,26 @@ func notPublicGet(_ context.Context, url string) (int, error) {
 	return 200, nil
 }
 
-func target() config.Target {
-	return config.Target{
-		Host:    "share.example.com",
-		User:    "mason",
-		Root:    "/srv/share",
-		BaseURL: "https://share.example.com",
+var testServer = config.Server{User: "mason", Host: "vps.example.net"}
+
+// shareScope is a share-only doctor run (doctor outside any project).
+func shareScope() DoctorScope {
+	return DoctorScope{
+		Server: &testServer,
+		Share:  &config.Share{URL: "https://share.example.com", Host: "share.example.com", Path: "/srv/share", Server: &testServer},
 	}
+}
+
+// siteScope is a site-only doctor run (a project, no share store configured).
+func siteScope(url, host, path string) DoctorScope {
+	return DoctorScope{
+		Server: &testServer,
+		Site:   &config.Site{Name: host, URL: url, Host: host, Path: path, Server: &testServer},
+	}
+}
+
+func runnerOf(r remote.CommandRunner) func(config.Server) remote.CommandRunner {
+	return func(config.Server) remote.CommandRunner { return r }
 }
 
 const caddyConfigJSON = `{"apps":{"http":{"servers":{"srv0":{"routes":[{"match":[{"host":["share.example.com"]}],"handle":[{"handler":"vars","root":"/srv/share"},{"handler":"file_server"}]}]}}}}}`
@@ -107,11 +120,11 @@ func statusByName(report DoctorReport, name string) (CheckStatus, bool) {
 
 func TestDiagnoseAllHealthy(t *testing.T) {
 	deps := DoctorDeps{
-		Runner:  healthyRunner(caddyConfigJSON),
-		Store:   memStore{m: probeManifest()},
-		HTTPGet: doctorHTTPGet(200),
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{m: probeManifest()},
+		HTTPGet:   doctorHTTPGet(200),
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if !report.Healthy() {
 		t.Fatalf("report not healthy: %+v", report.Checks)
 	}
@@ -124,8 +137,8 @@ func TestDiagnoseAllHealthy(t *testing.T) {
 
 func TestDiagnosePublicPrefixFails(t *testing.T) {
 	deps := DoctorDeps{
-		Runner: healthyRunner(caddyConfigJSON),
-		Store:  memStore{m: domain.NewManifest()},
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{m: domain.NewManifest()},
 		HTTPGet: func(_ context.Context, url string) (int, error) {
 			if strings.Contains(url, "/.mason/") {
 				return 200, nil // leaked!
@@ -133,7 +146,7 @@ func TestDiagnosePublicPrefixFails(t *testing.T) {
 			return 404, nil
 		},
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if report.Healthy() {
 		t.Fatal("report healthy despite public manifest")
 	}
@@ -144,8 +157,8 @@ func TestDiagnosePublicPrefixFails(t *testing.T) {
 
 func TestDiagnoseObjectsPrefixPublicFails(t *testing.T) {
 	deps := DoctorDeps{
-		Runner: healthyRunner(caddyConfigJSON),
-		Store:  memStore{m: domain.NewManifest()},
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{m: domain.NewManifest()},
 		HTTPGet: func(_ context.Context, url string) (int, error) {
 			if strings.Contains(url, "/objects/") {
 				return 200, nil
@@ -153,7 +166,7 @@ func TestDiagnoseObjectsPrefixPublicFails(t *testing.T) {
 			return 404, nil
 		},
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if report.Healthy() {
 		t.Fatal("report healthy despite public objects prefix")
 	}
@@ -169,8 +182,8 @@ func TestDiagnoseRsyncMissingFails(t *testing.T) {
 		}
 		return healthyRunner(caddyConfigJSON).fn(cmd)
 	}}
-	deps := DoctorDeps{Runner: runner, Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(runner), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	if s, _ := statusByName(report, "rsync available"); s != CheckFail {
 		t.Fatalf("rsync check = %q, want fail", s)
 	}
@@ -181,11 +194,11 @@ func TestDiagnoseRsyncMissingFails(t *testing.T) {
 
 func TestDiagnoseManifestErrorFails(t *testing.T) {
 	deps := DoctorDeps{
-		Runner:  healthyRunner(caddyConfigJSON),
-		Store:   memStore{err: errors.New("permission denied")},
-		HTTPGet: notPublicGet,
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{err: errors.New("permission denied")},
+		HTTPGet:   notPublicGet,
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if s, _ := statusByName(report, "manifest"); s != CheckFail {
 		t.Fatalf("manifest check = %q, want fail", s)
 	}
@@ -198,8 +211,8 @@ func TestDiagnoseManifestModeWarns(t *testing.T) {
 		}
 		return healthyRunner(caddyConfigJSON).fn(cmd)
 	}}
-	deps := DoctorDeps{Runner: runner, Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(runner), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	s, _ := statusByName(report, ".mason private")
 	if s != CheckWarn {
 		t.Fatalf(".mason private = %q, want warn for world-readable mode", s)
@@ -216,8 +229,8 @@ func TestDiagnoseCaddyUnavailableWarns(t *testing.T) {
 		}
 		return healthyRunner(caddyConfigJSON).fn(cmd)
 	}}
-	deps := DoctorDeps{Runner: runner, Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(runner), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	for _, name := range []string{"caddy serves host", "caddy root matches"} {
 		if s, _ := statusByName(report, name); s != CheckWarn {
 			t.Fatalf("%s = %q, want warn when admin API down", name, s)
@@ -230,8 +243,8 @@ func TestDiagnoseCaddyUnavailableWarns(t *testing.T) {
 
 func TestDiagnoseCaddyRootMismatchWarns(t *testing.T) {
 	mismatch := `{"x":{"host":["share.example.com"]},"y":{"root":"/var/www"}}`
-	deps := DoctorDeps{Runner: healthyRunner(mismatch), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(mismatch)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	if s, _ := statusByName(report, "caddy serves host"); s != CheckOK {
 		t.Fatalf("host check = %q, want ok", s)
 	}
@@ -243,11 +256,9 @@ func TestDiagnoseCaddyRootMismatchWarns(t *testing.T) {
 func TestDiagnoseApexMissingWWWWarns(t *testing.T) {
 	// An apex target whose Caddy config serves only the bare apex (no www) should
 	// warn that the www→apex redirect is missing, but stay healthy.
-	apex := target()
-	apex.BaseURL = "https://example.com"
-	apex.Root = "/srv/site"
+	apex := siteScope("https://example.com", "example.com", "/srv/site")
 	apexOnly := `{"x":{"host":["example.com"]},"y":{"root":"/srv/site"}}`
-	deps := DoctorDeps{Runner: healthyRunner(apexOnly), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(apexOnly)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
 	report := Diagnose(context.Background(), deps, apex)
 	if s, ok := statusByName(report, "caddy redirects www"); !ok || s != CheckWarn {
 		t.Fatalf("www check = %q (found=%v), want warn", s, ok)
@@ -258,11 +269,9 @@ func TestDiagnoseApexMissingWWWWarns(t *testing.T) {
 }
 
 func TestDiagnoseApexWithWWWOK(t *testing.T) {
-	apex := target()
-	apex.BaseURL = "https://example.com"
-	apex.Root = "/srv/site"
+	apex := siteScope("https://example.com", "example.com", "/srv/site")
 	withWWW := `{"x":{"host":["example.com","www.example.com"]},"y":{"root":"/srv/site"}}`
-	deps := DoctorDeps{Runner: healthyRunner(withWWW), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(withWWW)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
 	report := Diagnose(context.Background(), deps, apex)
 	if s, ok := statusByName(report, "caddy redirects www"); !ok || s != CheckOK {
 		t.Fatalf("www check = %q (found=%v), want ok", s, ok)
@@ -271,26 +280,72 @@ func TestDiagnoseApexWithWWWOK(t *testing.T) {
 
 func TestDiagnoseSubdomainHasNoWWWCheck(t *testing.T) {
 	// The default subdomain target must not emit the apex-only www check.
-	deps := DoctorDeps{Runner: healthyRunner(caddyConfigJSON), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	if _, ok := statusByName(report, "caddy redirects www"); ok {
 		t.Fatal("subdomain target should not produce a www-redirect check")
 	}
 }
 
-func TestDiagnoseDeployTreeProbedWhenSet(t *testing.T) {
-	tg := target()
-	tg.Deploy.RemotePath = "/srv/site"
-	deps := DoctorDeps{Runner: healthyRunner(caddyConfigJSON), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, tg)
-	if _, ok := statusByName(report, "deploy tree writable"); !ok {
-		t.Fatal("deploy tree check missing when remote_path set")
+func TestDiagnoseScopesChecks(t *testing.T) {
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+
+	// Site-only: no share checks at all (a deploy-only machine is not "unhealthy").
+	report := Diagnose(context.Background(), deps, siteScope("https://blog.example.com", "blog.example.com", "/var/www/blog.example.com"))
+	for _, c := range report.Checks {
+		if strings.HasPrefix(c.Group, "share") || c.Name == "manifest" {
+			t.Fatalf("site-only doctor ran share check %+v", c)
+		}
+	}
+	for _, name := range []string{"ssh connection", "web root writable", "caddy vhost", "site responds"} {
+		if _, ok := statusByName(report, name); !ok {
+			t.Fatalf("site doctor missing %q", name)
+		}
+	}
+
+	// Share-only: no site checks.
+	report = Diagnose(context.Background(), deps, shareScope())
+	if _, ok := statusByName(report, "web root writable"); ok {
+		t.Fatal("share-only doctor ran site checks")
+	}
+	if c := report.Checks[0]; c.Group != "server vps.example.net" {
+		t.Fatalf("first group = %q, want the server", c.Group)
 	}
 }
 
+func TestDiagnoseSiteSnippet(t *testing.T) {
+	tests := map[string]struct {
+		stdout string
+		exit   int
+		want   CheckStatus
+	}{
+		"managed and hardened": {"managed\nhidden\n", 0, CheckOK},
+		"hand-edited":          {"hand\nhidden\n", 0, CheckWarn},
+		"exposes dotfiles":     {"managed\nexposed\n", 0, CheckWarn},
+		"missing":              {"", 1, CheckFail},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			runner := scriptedRunner{fn: func(cmd string) (remote.CommandResult, error) {
+				if strings.Contains(cmd, "mason.d/blog.example.com.caddy") {
+					if tt.exit != 0 {
+						return remote.CommandResult{ExitCode: tt.exit}, errors.New("exit 1")
+					}
+					return remote.CommandResult{Stdout: tt.stdout}, nil
+				}
+				return healthyRunner(caddyConfigJSON).fn(cmd)
+			}}
+			deps := DoctorDeps{RunnerFor: runnerOf(runner), HTTPGet: notPublicGet}
+			report := Diagnose(context.Background(), deps, siteScope("https://blog.example.com", "blog.example.com", "/var/www/blog.example.com"))
+			if s, _ := statusByName(report, "caddy vhost"); s != tt.want {
+				t.Fatalf("caddy vhost = %q, want %q", s, tt.want)
+			}
+		})
+	}
+}
 func TestDiagnoseEmptyManifestHealthy(t *testing.T) {
-	deps := DoctorDeps{Runner: healthyRunner(caddyConfigJSON), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
-	report := Diagnose(context.Background(), deps, target())
+	deps := DoctorDeps{RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)), Store: memStore{m: domain.NewManifest()}, HTTPGet: notPublicGet}
+	report := Diagnose(context.Background(), deps, shareScope())
 	if !report.Healthy() {
 		t.Fatalf("empty manifest should stay healthy: %+v", report.Checks)
 	}
@@ -304,11 +359,11 @@ func TestDiagnoseEmptyManifestHealthy(t *testing.T) {
 
 func TestDiagnoseSymlinkServingFails(t *testing.T) {
 	deps := DoctorDeps{
-		Runner:  healthyRunner(caddyConfigJSON),
-		Store:   memStore{m: probeManifest()},
-		HTTPGet: doctorHTTPGet(404),
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{m: probeManifest()},
+		HTTPGet:   doctorHTTPGet(404),
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if report.Healthy() {
 		t.Fatal("report healthy despite symlink 404")
 	}
@@ -319,11 +374,11 @@ func TestDiagnoseSymlinkServingFails(t *testing.T) {
 
 func TestDiagnoseManifestErrorSkipsSymlinkProbe(t *testing.T) {
 	deps := DoctorDeps{
-		Runner:  healthyRunner(caddyConfigJSON),
-		Store:   memStore{err: errors.New("not found")},
-		HTTPGet: notPublicGet,
+		RunnerFor: runnerOf(healthyRunner(caddyConfigJSON)),
+		Store:     memStore{err: errors.New("not found")},
+		HTTPGet:   notPublicGet,
 	}
-	report := Diagnose(context.Background(), deps, target())
+	report := Diagnose(context.Background(), deps, shareScope())
 	if s, _ := statusByName(report, "manifest"); s != CheckFail {
 		t.Fatalf("manifest = %q, want fail", s)
 	}

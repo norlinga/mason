@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
-
-	"github.com/norlinga/mason/internal/config"
 )
 
 func TestRsyncBuildsArgsAndReportsProgress(t *testing.T) {
@@ -223,16 +221,26 @@ func TestRsyncCopiesDirectoryLocally(t *testing.T) {
 	}
 }
 
-func TestRsyncDestinationFromTarget(t *testing.T) {
-	target := config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Port: 2222,
+func TestRsyncDestination(t *testing.T) {
+	tests := map[string]SSHOptions{
+		"mason@share.example.com:/srv/x": {User: "mason", Host: "share.example.com", Port: 2222},
+		"me@[2001:db8::1]:/srv/x":       {User: "me", Host: "2001:db8::1"},
+		"alias:/srv/x":                   {Host: "alias"},
 	}
-	got := RsyncDestinationFromTarget(target, "/srv/share/demo.txt")
-	want := "mason@share.example.com:/srv/share/demo.txt"
+	for want, opts := range tests {
+		if got := RsyncDestination(opts, "/srv/x"); got != want {
+			t.Errorf("RsyncDestination(%+v) = %q, want %q", opts, got, want)
+		}
+	}
+}
+
+func TestRsyncTransportMatchesSSHArgs(t *testing.T) {
+	opts := SSHOptions{User: "mason", Host: "h", Port: 2222, KeyPath: "/k/id", ControlDir: "/tmp/ctl dir"}
+	got := rsyncSSHCommand(opts)
+	want := "ssh -o BatchMode=yes -o ConnectTimeout=15 -p 2222 -i /k/id -o IdentitiesOnly=yes " +
+		"-o ControlMaster=auto -o 'ControlPath=/tmp/ctl dir/%C' -o ControlPersist=60s"
 	if got != want {
-		t.Fatalf("destination = %q, want %q", got, want)
+		t.Fatalf("transport =\n %s\nwant\n %s", got, want)
 	}
 }
 

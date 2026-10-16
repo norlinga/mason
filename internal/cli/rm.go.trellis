@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Remove Endpoint Command
   "CLI handler for mason rm: remove one share endpoint (path or slug)."
@@ -12,8 +12,7 @@ Feature: Remove Endpoint Command
 
   Consumes:
     - links.Service.Remove
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - output.WriteJSON
 
   Invariants:

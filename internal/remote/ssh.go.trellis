@@ -1,38 +1,60 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: SSH Command Runner
-  "Connects to configured VPS targets and runs shell commands over SSH."
+  "Runs shell commands on a server through the system OpenSSH client, so ~/.ssh/config, ssh-agent, passphrase-protected keys, and known_hosts behave exactly as they do for rsync and for the user's own ssh."
 
   Provides:
     - remote.SSHOptions @source("symbol:SSHOptions")
+    - remote.SSHOptionsFromServer @source("symbol:SSHOptionsFromServer")
+    - remote.SSHOptions.Args @source("symbol:Args")
+    - remote.SSHOptions.Destination @source("symbol:Destination")
     - remote.CommandResult @source("symbol:CommandResult")
     - remote.CommandRunner @source("symbol:CommandRunner")
     - remote.SSH @source("symbol:SSH")
-    - remote.SSHDialer @source("symbol:SSHDialer")
-    - remote.SSHClient @source("symbol:SSHClient")
-    - remote.SSHSession @source("symbol:SSHSession")
-    - remote.SSHOptionsFromTarget @source("symbol:SSHOptionsFromTarget")
     - remote.NewSSH @source("symbol:NewSSH")
-    - remote.NewSSHWithDialer @source("symbol:NewSSHWithDialer")
+    - remote.NewSSHWithRunner @source("symbol:NewSSHWithRunner")
     - remote.SSH.Run @source("symbol:Run")
+    - remote.ConnectError @source("symbol:ConnectError")
 
   Consumes:
-    - config.Target
+    - config.Server
+    - remote.ProcessRunner
 
   Invariants:
-    - SSHOptionsFromTarget MUST default port 22 and a 30s dial timeout when unset
-    - Run MUST capture stdout, stderr, and exit code from the remote session
-    - Empty key_path MUST fall back to ~/.ssh/id_ed25519
+    - Run MUST invoke the system ssh binary; Mason MUST NOT carry its own SSH protocol client
+    - SSH options MUST be identical for Run and for rsync's -e transport (one Args source)
+    - Commands MUST run with BatchMode=yes so no password, passphrase, or host-key prompt can hang a command
+    - Unknown host keys MUST be rejected unless AcceptNewHostKey is set (only mason setup sets it, via StrictHostKeyChecking=accept-new)
+    - Port, key, and user MUST be passed only when configured, so ~/.ssh/config can supply them otherwise; a configured key MUST add IdentitiesOnly=yes
+    - The control directory MUST be short enough that <dir>/%C plus OpenSSH's temporary suffix fits a 104-byte unix socket path, falling back to /tmp/mason-<uid> and then to no multiplexing
+    - When ControlDir is set, connections MUST be multiplexed (ControlMaster=auto, short ControlPersist) with sockets under ControlDir, created 0700
+    - An ssh exit status of 255 MUST become a ConnectError with ExitCode -1 and a one-line, actionable reason; it MUST NOT echo the remote command
+    - Run MUST capture stdout, stderr, and the remote exit code; a non-zero remote exit MUST return an error that does not echo the command body
+
+  OutOfScope:
+    - Writing ~/.ssh/config or known_hosts (left to OpenSSH and the user)
+    - Key generation (setup)
+    - rsync invocation (remote.Rsync)
 
   Scenario (happy-path): Remote command succeeds
-    Given valid SSH credentials and a reachable host
+    Given a configured server
     When Run executes a shell command
-    Then ExitCode is 0 and stdout is captured
+    Then ssh receives BatchMode, the destination, and the command, and stdout and exit 0 are returned
 
-  Scenario (negative): Connection failure
-    Given an unreachable host
+  Scenario (negative): Unknown host key
+    Given ssh exits 255 with "Host key verification failed"
     When Run is invoked
-    Then it returns a connect error with ExitCode -1
+    Then it returns a ConnectError suggesting mason setup and ExitCode -1
+
+  Scenario (negative): Remote command fails
+    Given the remote command exits 3
+    When Run is invoked
+    Then ExitCode is 3, output is captured, and the error does not contain the command
+
+  Scenario (edge): Nothing configured but host
+    Given a server with no port and no key
+    When Args is built
+    Then no -p, -i, or IdentitiesOnly appear, leaving them to ~/.ssh/config

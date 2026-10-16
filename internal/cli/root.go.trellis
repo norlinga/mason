@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-10
+@reviewed: 2026-10-15
 
 Feature: Mason Root Command
   "Cobra root command wiring global flags and subcommands for the mason CLI."
@@ -11,7 +11,8 @@ Feature: Mason Root Command
     - cli.NewRootCommand @source("symbol:NewRootCommand")
 
   Invariants:
-    - Persistent flags MUST expose --target, --json, --dry-run, --yes, --quiet, --verbose, and --config
+    - Persistent flags MUST be exactly --json, --yes, --quiet, --verbose, and --config; --dry-run belongs to deploy
+    - --yes MUST only answer confirmations; it MUST NOT change which questions a command would otherwise ask
     - SilenceUsage and SilenceErrors MUST be true so cli controls error rendering
 
   OutOfScope:

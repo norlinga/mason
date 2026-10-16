@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: List Shares Command
   "CLI handler for mason ls: columnar or JSON listing from the local manifest cache."
@@ -13,8 +13,7 @@ Feature: List Shares Command
     - cli.renderTable @source("symbol:renderTable")
 
   Consumes:
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - cli.remoteSync
     - remote.LocalCache.Read
     - domain.Manifest

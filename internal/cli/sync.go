@@ -56,13 +56,9 @@ func renderSync(stdout io.Writer, opts output.Options, res remote.SyncResult) er
 
 // defaultSyncRun wires the real remote stack and reconciles the cache.
 func defaultSyncRun(ctx context.Context, root rootOptions, warn io.Writer) (remote.SyncResult, error) {
-	resolved, err := resolveTarget(root)
+	stack, err := shareStack(root)
 	if err != nil {
 		return remote.SyncResult{}, err
 	}
-	stack, err := newRemoteStack(resolved)
-	if err != nil {
-		return remote.SyncResult{}, err
-	}
-	return remote.Sync(ctx, stack.store, stack.cache, resolved.Name, warn)
+	return remote.Sync(ctx, stack.store, stack.cache, stack.cacheID, warn)
 }

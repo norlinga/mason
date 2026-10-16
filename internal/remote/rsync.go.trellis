@@ -17,17 +17,17 @@ Feature: Rsync Transfer
     - remote.NewRsyncWithRunner @source("symbol:NewRsyncWithRunner")
     - remote.Rsync.Upload @source("symbol:Upload")
     - remote.Rsync.CompareDryRun @source("symbol:CompareDryRun")
-    - remote.RsyncDestinationFromTarget @source("symbol:RsyncDestinationFromTarget")
+    - remote.RsyncDestination @source("symbol:RsyncDestination")
 
   Consumes:
     - remote.SSHOptions
-    - config.Target
 
   Invariants:
     - Upload MUST validate that the local source path exists before invoking rsync
     - CompareDryRun MUST use dry-run, itemize-changes, and stats without transferring bytes
     - CompareDryRun MUST request non-human-readable stats so counts and byte totals are plain integers
-    - RsyncDestinationFromTarget MUST format an SSH rsync destination as user, host, and remote path
+    - RsyncDestination MUST format user@host:path, bracketing IPv6 hosts
+    - The -e transport MUST be built from SSHOptions.Args so rsync and SSH.Run authenticate and verify hosts identically
     - Progress callbacks MUST receive parsed lines when rsync progress output is present
     - Filters MUST be passed to rsync as --filter rules in the given order, identically for Upload and CompareDryRun
     - Rsync MUST NOT impose filters of its own; exclusion policy belongs to callers (a shared single file may be a dotfile)

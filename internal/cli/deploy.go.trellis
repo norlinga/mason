@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Deploy Commands
   "CLI handlers for mason deploy and mason status with plan, progress, and summary output."
@@ -12,15 +12,20 @@ Feature: Deploy Commands
     - cli.defaultDeployRun @source("symbol:defaultDeployRun")
 
   Consumes:
+    - config.Config.Site
     - deploy.Service
-    - deploy.Result
     - output.WriteJSON
-    - output.HumanSize
+    - remote.SSHOptionsFromServer
 
   Invariants:
-    - status MUST always run as a dry-run plan and MUST NOT transfer bytes
-    - deploy MUST honor global --dry-run and MUST require confirmation before --delete removes remote files unless --yes
-    - Plain output MUST show target, plan line, and summary or up-to-date message
+    - The optional [site] argument MUST select a site by name or host; none selects the project's default site
+    - status MUST always run as a dry-run plan and MUST NOT transfer bytes; deploy --dry-run MUST behave the same
+    - deploy MUST require confirmation before --delete removes remote files unless --yes
+    - The build folder MUST resolve relative to the project file's directory, not the working directory
+    - Before planning, deploy MUST verify the site's path exists and is writable, failing with 'mason provision' as the fix
+    - build: . MUST warn on stderr that the whole project folder is deployed
+    - On a terminal, transfer progress MUST render as one in-place line; with -v as raw rsync lines; otherwise a single 'Sending …' line
+    - Plain output MUST show the site, build folder, plan line, and summary or up-to-date message
 
   OutOfScope:
     - Deploy planner parsing (owned by internal/deploy)

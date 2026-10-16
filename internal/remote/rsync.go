@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/norlinga/mason/internal/config"
 )
 
 const defaultRsyncBinary = "rsync"
@@ -81,6 +79,11 @@ func (r *Rsync) CompareDryRun(ctx context.Context, request CompareDryRunRequest)
 		return ProcessResult{ExitCode: -1}, err
 	}
 
+	if request.SSH != nil {
+		if err := request.SSH.prepare(); err != nil {
+			return ProcessResult{ExitCode: -1}, err
+		}
+	}
 	args := r.compareArgs(request)
 	result, err := r.runner.Run(ctx, r.binary, args, nil)
 	if err != nil {
@@ -95,6 +98,11 @@ func (r *Rsync) Upload(ctx context.Context, request RsyncRequest) (ProcessResult
 		return ProcessResult{ExitCode: -1}, err
 	}
 
+	if request.SSH != nil {
+		if err := request.SSH.prepare(); err != nil {
+			return ProcessResult{ExitCode: -1}, err
+		}
+	}
 	args := r.args(request)
 	result, err := r.runner.Run(ctx, r.binary, args, func(line string) {
 		if request.OnProgress == nil {
@@ -191,24 +199,26 @@ func appendFilters(args, filters []string) []string {
 	return args
 }
 
+// rsyncSSHCommand renders the -e transport from the same option list SSH.Run uses,
+// quoting each word for rsync's own splitter.
 func rsyncSSHCommand(options SSHOptions) string {
-	port := options.Port
-	if port == 0 {
-		port = defaultSSHPort
-	}
-	parts := []string{"ssh", "-p", strconv.Itoa(port)}
-	if strings.TrimSpace(options.KeyPath) != "" {
-		keyPath, err := expandHome(options.KeyPath)
-		if err == nil {
-			parts = append(parts, "-i", keyPath, "-o", "IdentitiesOnly=yes")
-		}
+	parts := []string{defaultSSHBinary}
+	for _, arg := range options.Args() {
+		parts = append(parts, rsyncQuote(arg))
 	}
 	return strings.Join(parts, " ")
 }
 
-// RsyncDestinationFromTarget formats an rsync destination for a configured target.
-func RsyncDestinationFromTarget(target config.Target, remotePath string) string {
-	return fmt.Sprintf("%s@%s:%s", target.User, target.Host, remotePath)
+func rsyncQuote(arg string) string {
+	if arg != "" && !strings.ContainsAny(arg, " \t'\"\\") {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
+}
+
+// RsyncDestination formats an rsync remote spec (user@host:path) for a server.
+func RsyncDestination(options SSHOptions, remotePath string) string {
+	return options.rsyncHost() + ":" + remotePath
 }
 
 func parseRsyncProgress(line string) RsyncProgress {

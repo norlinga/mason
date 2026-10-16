@@ -7,21 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/norlinga/mason/internal/config"
 	"github.com/norlinga/mason/internal/remote"
 )
 
 func TestServiceExecuteDeploys(t *testing.T) {
 	buildDir := writeBuildDir(t)
 	runner := &recordingRsync{}
-	svc := NewService("home", config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	plan := Plan{BuildDir: buildDir, RemotePath: "/srv/site", New: 1, BytesToSend: 4}
 	res, err := svc.Execute(context.Background(), DeployOptions{}, plan)
@@ -39,11 +31,7 @@ func TestServiceExecuteDeploys(t *testing.T) {
 func TestServiceExecuteAppliesDefaultFilters(t *testing.T) {
 	buildDir := writeBuildDir(t)
 	runner := &recordingRsync{}
-	svc := NewService("home", config.Target{
-		Host:   "share.example.com",
-		User:   "mason",
-		Deploy: config.DeployConfig{BuildDir: buildDir, RemotePath: "/srv/site"},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	plan := Plan{BuildDir: buildDir, RemotePath: "/srv/site", New: 1}
 	if _, err := svc.Execute(context.Background(), DeployOptions{}, plan); err != nil {
@@ -66,14 +54,7 @@ Total transferred file size: 4 bytes
 `,
 		},
 	}
-	svc := NewService("home", config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	res, err := svc.Run(context.Background(), DeployOptions{DryRun: true})
 	if err != nil {
@@ -102,14 +83,7 @@ Total transferred file size: 4 bytes
 `,
 		},
 	}
-	svc := NewService("home", config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	res, err := svc.Run(context.Background(), DeployOptions{})
 	if err != nil {
@@ -135,12 +109,7 @@ Total transferred file size: 0 bytes
 `,
 		},
 	}
-	svc := NewService("home", config.Target{
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	res, err := svc.Run(context.Background(), DeployOptions{})
 	if err != nil {
@@ -168,14 +137,7 @@ Total transferred file size: 4 bytes
 		},
 		uploadErr: wantErr,
 	}
-	svc := NewService("home", config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	svc := NewService(testSite(buildDir, "/srv/site"), runner)
 
 	_, err := svc.Run(context.Background(), DeployOptions{})
 	if err == nil {

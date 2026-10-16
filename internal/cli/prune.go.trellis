@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Prune Orphans Command
   "CLI handler for mason prune: garbage-collect unreferenced blobs."
@@ -12,8 +12,7 @@ Feature: Prune Orphans Command
 
   Consumes:
     - links.Service.Prune
-    - cli.resolveTarget
-    - cli.newRemoteStack
+    - cli.shareStack
     - output.WriteJSON
     - output.HumanSize
 

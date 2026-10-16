@@ -35,14 +35,14 @@ func healthyReport() setup.DoctorReport {
 
 func TestDoctorCommandPlainHealthy(t *testing.T) {
 	stdout, _, err := runDoctorCommand(t, []string{"doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return healthyReport(), nil
 		})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	// Columns are width-aligned; assert on content and the header rather than spacing.
-	for _, line := range []string{"CHECK", "STATUS", "DETAIL", "ssh connection", "rsync available", ".mason private"} {
+	for _, line := range []string{"WHAT", "CHECK", "STATUS", "DETAIL", "ssh connection", "rsync available", ".mason private"} {
 		if !strings.Contains(stdout, line) {
 			t.Fatalf("plain output missing %q:\n%s", line, stdout)
 		}
@@ -51,7 +51,7 @@ func TestDoctorCommandPlainHealthy(t *testing.T) {
 
 func TestDoctorCommandUnhealthyExitsNonZero(t *testing.T) {
 	stdout, _, err := runDoctorCommand(t, []string{"doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return setup.DoctorReport{Checks: []setup.DoctorCheck{
 				{Name: "rsync available", Status: setup.CheckFail, Detail: "not found"},
 			}}, nil
@@ -66,7 +66,7 @@ func TestDoctorCommandUnhealthyExitsNonZero(t *testing.T) {
 
 func TestDoctorCommandWarnStaysHealthy(t *testing.T) {
 	_, _, err := runDoctorCommand(t, []string{"doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return setup.DoctorReport{Checks: []setup.DoctorCheck{
 				{Name: ".mason private", Status: setup.CheckWarn, Detail: "mode 755"},
 			}}, nil
@@ -78,9 +78,9 @@ func TestDoctorCommandWarnStaysHealthy(t *testing.T) {
 
 func TestDoctorCommandJSON(t *testing.T) {
 	stdout, _, err := runDoctorCommand(t, []string{"--json", "doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return setup.DoctorReport{Checks: []setup.DoctorCheck{
-				{Name: "ssh connection", Status: setup.CheckOK, Detail: "reachable"},
+				{Group: "server example.com", Name: "ssh connection", Status: setup.CheckOK, Detail: "reachable"},
 			}}, nil
 		})
 	if err != nil {
@@ -92,6 +92,7 @@ func TestDoctorCommandJSON(t *testing.T) {
     "healthy": true,
     "checks": [
       {
+        "group": "server example.com",
         "name": "ssh connection",
         "status": "ok",
         "detail": "reachable"
@@ -107,7 +108,7 @@ func TestDoctorCommandJSON(t *testing.T) {
 
 func TestDoctorCommandJSONUnhealthy(t *testing.T) {
 	stdout, _, err := runDoctorCommand(t, []string{"--json", "doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return setup.DoctorReport{Checks: []setup.DoctorCheck{
 				{Name: "rsync available", Status: setup.CheckFail, Detail: "not found"},
 			}}, nil
@@ -125,7 +126,7 @@ func TestDoctorCommandJSONUnhealthy(t *testing.T) {
 
 func TestDoctorCommandRunError(t *testing.T) {
 	_, stderr, err := runDoctorCommand(t, []string{"doctor"},
-		func(context.Context, rootOptions) (setup.DoctorReport, error) {
+		func(context.Context, rootOptions, string) (setup.DoctorReport, error) {
 			return setup.DoctorReport{}, errors.New("no .mason config found")
 		})
 	if err == nil {

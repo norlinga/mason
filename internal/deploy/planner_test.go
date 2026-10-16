@@ -95,16 +95,7 @@ Total transferred file size: 4,918 bytes
 
 func TestPlannerPlan(t *testing.T) {
 	buildDir := writeBuildDir(t)
-	target := config.Target{
-		Host:    "share.example.com",
-		User:    "mason",
-		Root:    "/srv/share",
-		BaseURL: "https://share.example.com",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}
+	target := testSite(buildDir, "/srv/site")
 
 	runner := &fakeRunner{
 		result: remote.ProcessResult{
@@ -152,25 +143,25 @@ Total transferred file size: 24 bytes
 }
 
 func TestPlannerRequiresDeployConfig(t *testing.T) {
-	planner := NewPlanner(config.Target{}, &fakeRunner{})
+	planner := NewPlanner(testSite("", ""), &fakeRunner{})
 
 	tests := []struct {
 		name   string
-		target config.Target
+		target config.Site
 	}{
 		{
 			name:   "missing build dir",
-			target: config.Target{Deploy: config.DeployConfig{RemotePath: "/srv/site"}},
+			target: testSite("", "/srv/site"),
 		},
 		{
 			name:   "missing remote path",
-			target: config.Target{Deploy: config.DeployConfig{BuildDir: "./public"}},
+			target: testSite("./public", ""),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			planner.target = tt.target
+			planner.site = tt.target
 			_, err := planner.Plan(context.Background(), PlanOptions{})
 			if err == nil {
 				t.Fatalf("Plan succeeded, want error")
@@ -180,12 +171,7 @@ func TestPlannerRequiresDeployConfig(t *testing.T) {
 }
 
 func TestPlannerRejectsMissingBuildDirectory(t *testing.T) {
-	planner := NewPlanner(config.Target{
-		Deploy: config.DeployConfig{
-			BuildDir:   filepath.Join(t.TempDir(), "missing"),
-			RemotePath: "/srv/site",
-		},
-	}, &fakeRunner{})
+	planner := NewPlanner(testSite(filepath.Join(t.TempDir(), "missing"), "/srv/site"), &fakeRunner{})
 
 	_, err := planner.Plan(context.Background(), PlanOptions{})
 	if err == nil {
@@ -196,14 +182,7 @@ func TestPlannerRejectsMissingBuildDirectory(t *testing.T) {
 func TestPlannerWrapsRunnerError(t *testing.T) {
 	buildDir := writeBuildDir(t)
 	wantErr := errors.New("rsync failed")
-	planner := NewPlanner(config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   buildDir,
-			RemotePath: "/srv/site",
-		},
-	}, &fakeRunner{err: wantErr})
+	planner := NewPlanner(testSite(buildDir, "/srv/site"), &fakeRunner{err: wantErr})
 
 	_, err := planner.Plan(context.Background(), PlanOptions{})
 	if err == nil {
@@ -231,14 +210,7 @@ Total transferred file size: 0 bytes
 `,
 		},
 	}
-	planner := NewPlanner(config.Target{
-		Host: "share.example.com",
-		User: "mason",
-		Deploy: config.DeployConfig{
-			BuildDir:   relDir,
-			RemotePath: "/srv/site",
-		},
-	}, runner)
+	planner := NewPlanner(testSite(relDir, "/srv/site"), runner)
 
 	if _, err := planner.Plan(context.Background(), PlanOptions{BaseDir: baseDir}); err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -267,12 +239,7 @@ func TestPlannerCompareDryRunLocally(t *testing.T) {
 		t.Fatalf("write stale file: %v", err)
 	}
 
-	planner := NewPlanner(config.Target{
-		Deploy: config.DeployConfig{
-			BuildDir:   local,
-			RemotePath: remoteDir,
-		},
-	}, &localCompareRunner{dest: remoteDir})
+	planner := NewPlanner(testSite(local, remoteDir), &localCompareRunner{dest: remoteDir})
 
 	plan, err := planner.Plan(context.Background(), PlanOptions{Delete: true})
 	if err != nil {
@@ -303,9 +270,7 @@ func TestPlannerExcludesDotfilesLocally(t *testing.T) {
 	// A dotfile already on the server must survive --delete (excluded paths are protected).
 	writeFile(t, filepath.Join(remoteDir, ".git", "HEAD"), "ref")
 
-	planner := NewPlanner(config.Target{
-		Deploy: config.DeployConfig{BuildDir: local, RemotePath: remoteDir},
-	}, &localCompareRunner{dest: remoteDir})
+	planner := NewPlanner(testSite(local, remoteDir), &localCompareRunner{dest: remoteDir})
 
 	plan, err := planner.Plan(context.Background(), PlanOptions{Delete: true})
 	if err != nil {
@@ -363,4 +328,15 @@ func (r *localCompareRunner) CompareDryRun(ctx context.Context, request remote.C
 	request.Destination = ensureTrailingSlash(r.dest)
 	request.SSH = nil
 	return remote.NewRsync().CompareDryRun(ctx, request)
+}
+
+func testSite(build, path string) config.Site {
+	return config.Site{
+		Name:   "home",
+		URL:    "https://share.example.com",
+		Host:   "share.example.com",
+		Build:  build,
+		Path:   path,
+		Server: &config.Server{User: "mason", Host: "share.example.com"},
+	}
 }

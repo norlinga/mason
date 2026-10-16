@@ -4,7 +4,7 @@
 @reviewed: 2026-10-15
 
 Feature: Deploy Planner
-  "Diffs local build_dir against remote deploy path using rsync dry-run and returns plan counts."
+  "Diffs a site's local build folder against its server path using rsync dry-run and returns plan counts."
 
   Provides:
     - deploy.Runner @source("symbol:Runner")
@@ -17,12 +17,13 @@ Feature: Deploy Planner
     - deploy.DefaultFilters @source("symbol:DefaultFilters")
 
   Consumes:
-    - config.Target
+    - config.Site
     - remote.CompareDryRunRequest
-    - remote.RsyncDestinationFromTarget
+    - remote.RsyncDestination
+    - remote.SSHOptionsFromServer
 
   Invariants:
-    - Plan MUST require deploy.build_dir and deploy.remote_path on the target
+    - Plan MUST require the site's build folder, path, and server, failing with a hint to set build: when the folder is unset
     - Plan MUST run rsync with dry-run, itemize-changes, and stats only — no bytes transferred
     - Plan MUST apply DefaultFilters so dotfiles and dot-directories at any depth are never planned for transfer, except /.well-known/ at the build root
     - Excluded remote paths MUST be protected from --delete (no --delete-excluded)
@@ -50,6 +51,6 @@ Feature: Deploy Planner
     Then only regular content and /.well-known/ are planned, and the remote .git/ is not removed
 
   Scenario (negative): Missing deploy config
-    Given a target without build_dir or remote_path
+    Given a site without a build folder or path
     When Plan runs
     Then it returns a validation error before rsync
