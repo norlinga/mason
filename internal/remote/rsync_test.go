@@ -128,9 +128,35 @@ func TestRsyncCompareDryRunBuildsArgs(t *testing.T) {
 		t.Fatalf("CompareDryRun: %v", err)
 	}
 
-	for _, want := range []string{"-a", "--dry-run", "--itemize-changes", "--stats", "--human-readable", "--delete", "-e"} {
+	for _, want := range []string{"-a", "--dry-run", "--itemize-changes", "--stats", "--no-human-readable", "--delete", "-e"} {
 		if !slices.Contains(runner.args, want) {
 			t.Fatalf("args missing %q: %#v", want, runner.args)
+		}
+	}
+}
+
+func TestRsyncRendersFiltersInOrder(t *testing.T) {
+	source := t.TempDir()
+	filters := []string{"+ /.well-known/", "- .*"}
+	want := []string{"--filter=+ /.well-known/", "--filter=- .*"}
+
+	compare := &fakeProcessRunner{}
+	if _, err := NewRsyncWithRunner("rsync", compare).CompareDryRun(context.Background(), CompareDryRunRequest{
+		Source: source, Destination: "dest/", Filters: filters,
+	}); err != nil {
+		t.Fatalf("CompareDryRun: %v", err)
+	}
+	upload := &fakeProcessRunner{}
+	if _, err := NewRsyncWithRunner("rsync", upload).Upload(context.Background(), RsyncRequest{
+		Source: source, Destination: "dest/", Filters: filters,
+	}); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	for name, args := range map[string][]string{"compare": compare.args, "upload": upload.args} {
+		i := slices.Index(args, want[0])
+		if i < 0 || i+1 >= len(args) || args[i+1] != want[1] {
+			t.Fatalf("%s args missing ordered filters %#v: %#v", name, want, args)
 		}
 	}
 }

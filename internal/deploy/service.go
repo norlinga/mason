@@ -75,6 +75,7 @@ func (s *Service) Execute(ctx context.Context, opts DeployOptions, plan Plan) (R
 		Source:      source,
 		Destination: deployDestination(s.target, plan.RemotePath),
 		Delete:      opts.Delete,
+		Filters:     DefaultFilters,
 		SSH:         &ssh,
 		OnProgress:  opts.OnProgress,
 	})

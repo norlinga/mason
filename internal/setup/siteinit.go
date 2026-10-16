@@ -176,8 +176,9 @@ func staticSnippetFor(siteAddress, root string, p SiteInitParams) string {
 	})
 }
 
-// caddyStaticSnippet renders a plain static vhost: serve the root with file_server.
-// Unlike caddyShareSnippet there is no /objects/* or /.mason/* 404 matcher. With spa,
+// caddyStaticSnippet renders a plain static vhost: serve the root with file_server,
+// 404ing dotfile paths except /.well-known/. Unlike caddyShareSnippet there is no
+// /objects/* matcher. With spa,
 // requests that miss a file fall back to /index.html for client-side routing. For an
 // apex domain it also emits a permanent www→apex redirect block so both names work.
 func caddyStaticSnippet(s staticSnippet) string {
@@ -187,6 +188,10 @@ func caddyStaticSnippet(s staticSnippet) string {
 	if s.spa {
 		b.WriteString("\ttry_files {path} /index.html\n")
 	}
+	// Never serve dotfiles (.git, .env, .mason, …) even if one reaches the web root;
+	// /.well-known/ stays public by design.
+	b.WriteString("\t@mason_hidden {\n\t\tpath */.*\n\t\tnot path /.well-known/*\n\t}\n")
+	b.WriteString("\trespond @mason_hidden 404\n")
 	b.WriteString("\tfile_server\n")
 	b.WriteString("}\n")
 	if s.wwwRedirect {

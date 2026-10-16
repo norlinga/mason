@@ -28,8 +28,10 @@ type RsyncRequest struct {
 	Destination string
 	Delete      bool
 	DryRun      bool
-	SSH         *SSHOptions
-	OnProgress  func(RsyncProgress)
+	// Filters are rsync filter rules ("+ pattern" / "- pattern"), applied in order.
+	Filters    []string
+	SSH        *SSHOptions
+	OnProgress func(RsyncProgress)
 }
 
 // CompareDryRunRequest describes a directory diff dry-run for deploy planning.
@@ -37,7 +39,9 @@ type CompareDryRunRequest struct {
 	Source      string
 	Destination string
 	Delete      bool
-	SSH         *SSHOptions
+	// Filters are rsync filter rules ("+ pattern" / "- pattern"), applied in order.
+	Filters []string
+	SSH     *SSHOptions
 }
 
 // RsyncProgress is a parsed progress event from rsync output.
@@ -143,11 +147,13 @@ func (r *Rsync) compareArgs(request CompareDryRunRequest) []string {
 		"--dry-run",
 		"--itemize-changes",
 		"--stats",
-		"--human-readable",
+		// Plain integers ("4918 bytes", not "4.92K bytes") so the planner can parse stats.
+		"--no-human-readable",
 	}
 	if request.Delete {
 		args = append(args, "--delete")
 	}
+	args = appendFilters(args, request.Filters)
 	if request.SSH != nil {
 		args = append(args, "-e", rsyncSSHCommand(*request.SSH))
 	}
@@ -168,10 +174,20 @@ func (r *Rsync) args(request RsyncRequest) []string {
 	if request.DryRun {
 		args = append(args, "--dry-run")
 	}
+	args = appendFilters(args, request.Filters)
 	if request.SSH != nil {
 		args = append(args, "-e", rsyncSSHCommand(*request.SSH))
 	}
 	args = append(args, request.Source, request.Destination)
+	return args
+}
+
+// appendFilters renders filter rules as --filter args, preserving order: rsync applies
+// the first matching rule, so an include must precede the exclude it carves out of.
+func appendFilters(args, filters []string) []string {
+	for _, rule := range filters {
+		args = append(args, "--filter="+rule)
+	}
 	return args
 }
 

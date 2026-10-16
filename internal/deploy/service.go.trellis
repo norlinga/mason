@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Deploy Orchestration
   "Plans and executes build-directory rsync deploys with pre-flight diff and post-run summary inputs."
@@ -27,6 +27,7 @@ Feature: Deploy Orchestration
     - Run MUST plan with rsync dry-run before any real transfer
     - Run MUST skip rsync upload when DryRun is true or the plan is already up to date
     - Deploy MUST use the same source and destination paths as the planner
+    - Execute MUST upload with the same DefaultFilters the planner used, so the plan matches what is sent
 
   OutOfScope:
     - CLI rendering and confirmation prompts (owned by internal/cli)

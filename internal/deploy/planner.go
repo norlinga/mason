@@ -69,6 +69,7 @@ func (p *Planner) Plan(ctx context.Context, opts PlanOptions) (Plan, error) {
 		Source:      source,
 		Destination: deployDestination(p.target, remotePath),
 		Delete:      opts.Delete,
+		Filters:     DefaultFilters,
 		SSH:         sshOptions(p.target),
 	})
 	if err != nil {
@@ -100,10 +101,12 @@ type compareStats struct {
 }
 
 var (
-	createdFilesRE     = regexp.MustCompile(`^Number of created files:\s*(\d+)(?:\s*\(reg:\s*(\d+)\))?`)
-	deletedFilesRE     = regexp.MustCompile(`^Number of deleted files:\s*(\d+)(?:\s*\(reg:\s*(\d+)\))?`)
-	transferredFilesRE = regexp.MustCompile(`^Number of regular files transferred:\s*(\d+)`)
-	fileListRE         = regexp.MustCompile(`^Number of files:\s*(\d+)(?:\s*\(reg:\s*(\d+)(?:,\s*dir:\s*(\d+))?\))?`)
+	// Counts may carry thousands separators ("1,205") and the reg breakdown may be
+	// followed by other kinds ("(reg: 3, dir: 2)"); only the regular-file count is used.
+	createdFilesRE     = regexp.MustCompile(`^Number of created files:\s*([\d,]+)(?:\s*\(reg:\s*([\d,]+))?`)
+	deletedFilesRE     = regexp.MustCompile(`^Number of deleted files:\s*([\d,]+)(?:\s*\(reg:\s*([\d,]+))?`)
+	transferredFilesRE = regexp.MustCompile(`^Number of regular files transferred:\s*([\d,]+)`)
+	fileListRE         = regexp.MustCompile(`^Number of files:\s*([\d,]+)(?:\s*\(reg:\s*([\d,]+))?`)
 	transferredSizeRE  = regexp.MustCompile(`^Total transferred file size:\s*([0-9,]+)\s*bytes`)
 )
 
@@ -183,6 +186,12 @@ func resolveBuildDir(buildDir, baseDir string) (string, error) {
 	return ensureTrailingSlash(absPath), nil
 }
 
+// DefaultFilters keep dotfiles and dot-directories (.git, .env, .mason, .claude, …)
+// out of every deploy, at any depth, so a build_dir of "./" cannot publish project
+// metadata. /.well-known/ at the site root is carved out because it is public by design
+// (security.txt, ACME, app links). Excluded paths are also protected from --delete.
+var DefaultFilters = []string{"+ /.well-known/", "- .*"}
+
 func deployDestination(target config.Target, remotePath string) string {
 	clean := strings.TrimSuffix(strings.TrimSpace(remotePath), "/") + "/"
 	return remote.RsyncDestinationFromTarget(target, clean)
@@ -237,7 +246,7 @@ func atoiFirst(values []string) int {
 		if value == "" {
 			continue
 		}
-		n, err := strconv.Atoi(value)
+		n, err := strconv.Atoi(strings.ReplaceAll(value, ",", ""))
 		if err != nil {
 			continue
 		}

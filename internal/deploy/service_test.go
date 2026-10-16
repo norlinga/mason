@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,24 @@ func TestServiceExecuteDeploys(t *testing.T) {
 	}
 	if runner.uploadCalls != 1 {
 		t.Fatalf("upload calls = %d, want 1", runner.uploadCalls)
+	}
+}
+
+func TestServiceExecuteAppliesDefaultFilters(t *testing.T) {
+	buildDir := writeBuildDir(t)
+	runner := &recordingRsync{}
+	svc := NewService("home", config.Target{
+		Host:   "share.example.com",
+		User:   "mason",
+		Deploy: config.DeployConfig{BuildDir: buildDir, RemotePath: "/srv/site"},
+	}, runner)
+
+	plan := Plan{BuildDir: buildDir, RemotePath: "/srv/site", New: 1}
+	if _, err := svc.Execute(context.Background(), DeployOptions{}, plan); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !slices.Equal(runner.uploadRequest.Filters, DefaultFilters) {
+		t.Fatalf("upload filters = %#v, want %#v", runner.uploadRequest.Filters, DefaultFilters)
 	}
 }
 

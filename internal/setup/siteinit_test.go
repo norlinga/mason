@@ -51,6 +51,8 @@ func TestSiteInitScriptInvariants(t *testing.T) {
 		// plain static vhost
 		"blog.example.com {",
 		"file_server",
+		// dotfiles are never served, but /.well-known/ stays public
+		"\t@mason_hidden {\n\t\tpath */.*\n\t\tnot path /.well-known/*\n\t}\n\trespond @mason_hidden 404\n\tfile_server\n",
 		// single import line, idempotent
 		"grep -qF 'import /etc/caddy/mason.d/*.caddy' \"$CADDYFILE\" 2>/dev/null ||",
 		// snippet written to per-target file

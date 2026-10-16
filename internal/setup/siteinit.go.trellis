@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-10
-@reviewed: 2026-06-10
+@reviewed: 2026-10-15
 
 Feature: Static Host Provisioning Script Generator
   "Renders the idempotent provisioning script for a static site (apex domain or subdomain): a mason-owned, group-readable web root, Caddy group access, and a Mason-owned static Caddy snippet imported once. Apex domains also get a www→apex redirect. No share scaffolding, no user/key creation."
@@ -19,7 +19,8 @@ Feature: Static Host Provisioning Script Generator
   Invariants:
     - SiteInitScript MUST be a deterministic, pure function of its params (same input, same script)
     - The script MUST be idempotent for the web root, the snippet file, and the Caddyfile import line
-    - The Caddy snippet MUST be a static file_server vhost and MUST NOT include /objects/* or /.mason/* matchers
+    - The Caddy snippet MUST be a static file_server vhost and MUST NOT include the share store's /objects/* private-prefix matcher
+    - The Caddy snippet MUST 404 every dotfile path (`path */.*`) except /.well-known/*, before file_server and after any SPA try_files
     - Apex vs subdomain MUST be auto-detected via the Public Suffix List, overridable by DomainMode ("apex"/"subdomain")
     - An apex domain MUST be served from the bare apex and (unless NoWWW) MUST add a permanent www→apex redirect; a www-prefixed base_url MUST normalize to the same apex result
     - A subdomain MUST be served verbatim with no www redirect block

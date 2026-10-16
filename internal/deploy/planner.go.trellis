@@ -1,7 +1,7 @@
 @owner: mason
 @stability: stable
 @since: 2026-06-09
-@reviewed: 2026-06-09
+@reviewed: 2026-10-15
 
 Feature: Deploy Planner
   "Diffs local build_dir against remote deploy path using rsync dry-run and returns plan counts."
@@ -14,6 +14,7 @@ Feature: Deploy Planner
     - deploy.PlanOptions @source("symbol:PlanOptions")
     - deploy.Planner.Plan
     - deploy.ParseCompareOutput @source("symbol:ParseCompareOutput")
+    - deploy.DefaultFilters @source("symbol:DefaultFilters")
 
   Consumes:
     - config.Target
@@ -23,7 +24,10 @@ Feature: Deploy Planner
   Invariants:
     - Plan MUST require deploy.build_dir and deploy.remote_path on the target
     - Plan MUST run rsync with dry-run, itemize-changes, and stats only — no bytes transferred
+    - Plan MUST apply DefaultFilters so dotfiles and dot-directories at any depth are never planned for transfer, except /.well-known/ at the build root
+    - Excluded remote paths MUST be protected from --delete (no --delete-excluded)
     - ParseCompareOutput MUST derive new, changed, unchanged, remove, and bytes-to-send from rsync stats
+    - ParseCompareOutput MUST count regular files only (never directories) and MUST accept thousands separators and a trailing kind breakdown such as "(reg: 1,205, dir: 2)"
 
   OutOfScope:
     - Running deploy transfers (future M-061)
@@ -39,6 +43,11 @@ Feature: Deploy Planner
     Given local build_dir matches remote
     When Plan runs
     Then transferred counts are zero and unchanged equals local file count
+
+  Scenario (edge): Dotfiles in the build tree
+    Given a build_dir containing .git/, .env, .mason, nested dotfiles, and /.well-known/security.txt
+    When Plan runs with --delete against a remote that already has a .git/
+    Then only regular content and /.well-known/ are planned, and the remote .git/ is not removed
 
   Scenario (negative): Missing deploy config
     Given a target without build_dir or remote_path

@@ -57,6 +57,17 @@ Total transferred file size: 28,400,000 bytes
 			want: compareStats{New: 12, Changed: 3, Unchanged: 184, Remove: 1, BytesToSend: 28400000},
 		},
 		{
+			// Verbatim rsync 3.x output: thousands separators and a dir breakdown.
+			name: "large tree with directories",
+			output: `Number of files: 1,207 (reg: 1,205, dir: 2)
+Number of created files: 1,206 (reg: 1,205, dir: 1)
+Number of deleted files: 3 (reg: 2, dir: 1)
+Number of regular files transferred: 1,205
+Total transferred file size: 4,918 bytes
+`,
+			want: compareStats{New: 1205, Remove: 2, BytesToSend: 4918},
+		},
+		{
 			name:    "missing stats",
 			output:  `>f+++++++++ new.txt`,
 			wantErr: true,
@@ -270,6 +281,50 @@ func TestPlannerCompareDryRunLocally(t *testing.T) {
 	if plan.New != 1 || plan.Remove != 1 || plan.Unchanged != 1 {
 		t.Fatalf("counts = new:%d unchanged:%d remove:%d, want 1/1/1",
 			plan.New, plan.Unchanged, plan.Remove)
+	}
+}
+
+func TestPlannerExcludesDotfilesLocally(t *testing.T) {
+	requireRsync(t)
+
+	local := t.TempDir()
+	remoteDir := t.TempDir()
+	for name, body := range map[string]string{
+		"index.html":                 "home",
+		".well-known/security.txt":   "contact",
+		".git/config":                "[core]",
+		".env":                       "SECRET=1",
+		".mason":                     "default: home",
+		"assets/.DS_Store":           "junk",
+		"nested/.well-known/ignored": "nested",
+	} {
+		writeFile(t, filepath.Join(local, name), body)
+	}
+	// A dotfile already on the server must survive --delete (excluded paths are protected).
+	writeFile(t, filepath.Join(remoteDir, ".git", "HEAD"), "ref")
+
+	planner := NewPlanner(config.Target{
+		Deploy: config.DeployConfig{BuildDir: local, RemotePath: remoteDir},
+	}, &localCompareRunner{dest: remoteDir})
+
+	plan, err := planner.Plan(context.Background(), PlanOptions{Delete: true})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	// Only index.html ("home") and .well-known/security.txt ("contact") are sent.
+	if want := int64(len("home") + len("contact")); plan.New != 2 || plan.BytesToSend != want || plan.Remove != 0 {
+		t.Fatalf("new = %d bytes_to_send = %d remove = %d, want 2, %d, 0",
+			plan.New, plan.BytesToSend, plan.Remove, want)
+	}
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
