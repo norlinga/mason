@@ -12,3 +12,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 )
+
+// v0.2.0 was re-released as v0.2.1 after its history was rewritten; same code.
+retract v0.2.0
