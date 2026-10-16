@@ -109,14 +109,22 @@ sites:
   live: https://shop.example.com
 ```
 
-A site whose server folder doesn't match its host, on another server:
+A site whose server folder doesn't match its host:
 
 ```yaml
 build: .
 site:
   url: https://family.example.com
   path: /var/www/family
-  server: family.example.com
+```
+
+A site on a different server than the one in `~/.mason`:
+
+```yaml
+site:
+  url: https://example.org
+  server: deploy@other.example.net:2222
+build: dist
 ```
 
 ---

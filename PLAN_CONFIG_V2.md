@@ -1,6 +1,6 @@
 # Plan: Config v2 — servers, sites, and one share store
 
-**Status:** Implemented on branch `config-v2` (2026-10-15); migration of `sites/` pending owner approval. Website (C9) not started.
+**Status:** Implemented and migrated (2026-10-15) on branch `config-v2`. Website (C9) not started.
 **Breaking:** Yes, deliberately. No compatibility shim; old-format files fail with a
 pointer to `CONFIG.md`. The 25 `sites/*/.mason` files and `~/.mason` are rewritten in
 one pass (see [Migration](#migration)).
@@ -282,7 +282,9 @@ Deploy preflight: if the site's path does not exist on the server, fail with
   `recipes.example.com` and `example.com` removed, dotfile 404 live on all 23 static vhosts
   (F11's "today" step complete).
 
-## Open questions
-
-1. Is `family.example.com` a different machine from `example.com`? (Owner
-   checking.) Migration keeps its explicit `server:` either way, so this does not block.
+- **`family.example.com`** — resolves to the same IP as `example.com`; its
+  project file uses the default server and keeps only `path: /var/www/family`.
+- **Migration done 2026-10-15** — server snippets renamed by host and marked managed
+  (`portfolio.example.com` left hand-edited for its `header` line); `~/.mason` and all 25
+  `sites/*/.mason` rewritten to v2 (v1 copy at `~/.mason.v1.bak`); `mason status` verified in
+  every project.
