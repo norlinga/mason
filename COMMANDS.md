@@ -24,7 +24,7 @@ Two ideas organize the entire CLI.
 | **Share** | Publish a single file and get back a shareable URL | Rich CRUD: list, re-home, duplicate, disable, remove |
 | **Deploy** | Sync a build-output directory to a remote path | Simple: transfer a tree, report clearly what happened |
 
-They share config, targets, and transport (SSH/rsync), but they are *not* the
+They share config, servers, and transport (SSH/rsync), but they are *not* the
 same operation and do not share remote storage mechanics.
 
 **2. Within Share: local-touching commands vs. remote-link commands.**
@@ -73,13 +73,14 @@ named by the ref:
 
 | Flag | Meaning |
 |------|---------|
-| `-t, --target <name>` | Override the default target for this command |
 | `--json` | Emit machine-readable output (for `jq`, scripting) |
-| `-n, --dry-run` | Show what would happen; change nothing |
-| `-y, --yes` | Skip confirmation prompts |
+| `-y, --yes` | Answer yes to confirmations (never changes *which* questions are asked) |
 | `-q, --quiet` | Minimal output |
 | `-v, --verbose` | Extra detail |
-| `--config <path>` | Use a specific config file |
+| `--config <path>` | Use this project `.mason` instead of searching upward |
+
+`-n/--dry-run` belongs to `deploy` (where it equals `status`); `provision` and `setup`
+use `--print` to show their scripts instead of running them.
 
 Plain output is always columnar and greppable. `--json` is the structured
 counterpart for piping. Both are first-class — the Unix-composability of share
@@ -112,9 +113,9 @@ mason share ~/Recordings/foo.mp3 --as super/rad/podcasts/
 mason share ~/Recordings/foo.mp3 --as super/rad/podcasts/episode-01.mp3
 ```
 
-- **No `--as`** → the file lands at `<default_path>/<filename>`, where
-  `default_path` is a per-target config value (e.g. `inbox/` or `shares/`). The
-  default bucket is just the implicit `--as`.
+- **No `--as`** → the file lands at `<inbox>/<filename>`, where `inbox` is the
+  share store's optional `inbox:` setting in `~/.mason` (e.g. `inbox/`); without it,
+  at `<filename>`. The inbox is just the implicit `--as`.
 - **`--as` with a trailing slash** → "into this directory, keep the filename."
 - **`--as` with a full path** → "this exact path," which also lets you rename.
 
@@ -185,25 +186,29 @@ files or hundreds of posts with heavy media.
 
 | Command | Behavior |
 |---------|----------|
-| `mason init` | Scaffold a project `.mason` for deploy (target, build directory, remote root). |
-| `mason deploy [target]` | rsync the build tree to the remote root, with a pre-flight plan, live progress, and a post-run summary. |
-| `mason status [target]` | Show the deploy plan **without transferring** — what's new, changed, unchanged, or stale. Equivalent to `deploy -n`. |
+| `mason init [url]` | Write the project `.mason` (site URL + build folder; URL defaults to a domain-like folder name, build folder is detected), then offer to `provision`. |
+| `mason deploy [site]` | rsync the build folder to the site's path, with a pre-flight plan, live progress, and a post-run summary. `[site]` is a name under `sites:` or a host; default is the first site. |
+| `mason status [site]` | Show the deploy plan **without transferring**. Same as `deploy --dry-run`. |
 
 Mirror-delete (removing remote files absent locally) is **opt-in** via
-`--delete` and confirmed before running — the one genuine footgun.
+`--delete` and confirmed before running — the one genuine footgun. Dotfiles are
+never deployed (except `/.well-known/`), and remote dotfiles are never deleted.
+Before planning, deploy checks the site is provisioned and says `mason provision`
+if not. `build: .` (the whole project) works but warns on every deploy.
 
 Example:
 
 ```
 $ mason deploy
-Target: home (share.example.com:/srv/site)
-Comparing local ./public ↔ remote …  done
-Plan: 12 new · 3 changed · 184 unchanged · 1 to remove   (28.4 MB to send)
-Sending  ████████████░░░░  18.1/28.4 MB  6.2 MB/s  img/cover.png
+Site:  https://blog.example.com → example.com:/var/www/blog.example.com
+Build: dist
+Plan:  12 new · 3 changed · 184 unchanged · 1 to remove   (28.4 MB to send)
+Sending ████████████░░░░░░░░░░░░  50%  14.20M  6.20MB/s
 ✓ Done in 5.1s — 15 files updated, 28.4 MB sent, 1 removed
 ```
 
-When nothing changed:
+The progress line is live on a terminal; piped output gets a single `Sending …`;
+`-v` prints rsync's raw lines. When nothing changed:
 
 ```
 ✓ Already up to date (199 files, 0 B sent)
@@ -215,90 +220,56 @@ When nothing changed:
 
 | Command | Behavior |
 |---------|----------|
-| `mason setup` | Local onboarding wizard: ensure an SSH key exists, write/validate config, test connectivity. |
-| `mason doctor` | Diagnostics: SSH reachability, remote directory permissions, symlink serving, Caddy root sanity. |
-| `mason remote-init` | One-time server bootstrap: create the store layout, configure the deploy user, print/install the Caddy snippet. |
-| `mason site-init` | Provision a static site (apex domain or subdomain): web root, Caddy read access, and a Mason-owned static Caddy vhost imported once. Apex domains also get a www→apex redirect. No share store. |
-| `mason target ls\|add\|use\|rm` | Manage named targets without hand-editing config. |
+| `mason setup <server>` | Make this machine able to publish to a server: reuse what already works, else create `~/.ssh/mason` and (after asking) bootstrap the server as an admin; verify; record in `~/.mason`. `--share <url>` also provisions the share store. Replaces v1 `setup` + `remote-init`. |
+| `mason provision [site]` | Create the site's folder and its Mason-managed Caddy vhost (named by host), validate, reload — as an admin, after asking. Replaces v1 `site-init`. |
+| `mason key ls\|add\|rm` | Manage which machines may publish (the mason user's `authorized_keys`), no admin needed. |
+| `mason doctor [site]` | Read-only checks for everything configured: server, share store, and (in a project) the site. Exits non-zero on failure. |
 
----
+The admin commands (`setup` when bootstrapping, `provision`, `setup --share`) share one
+model: Mason renders an idempotent POSIX `sh` script, shows what it will do, asks, and
+runs it over SSH as the admin (`--admin`, default `root`; `--admin-key` to pick a key).
+`--print` writes the script to stdout instead, for review or `| ssh root@host sh`.
 
-## Static site provisioning (`site-init`)
+### Server bootstrap (inside `mason setup`)
 
-`mason site-init` stands up a **static site** — no share object store — following the
-same print-or-apply model as `remote-init`. It emits an idempotent, inspectable POSIX
-`sh` script by default; pass `--apply --as-admin <user>` to run it over SSH as an admin.
-The script:
+Once per server: the `mason` service user and group, this machine's key (with
+`no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc`), Caddy added to
+the mason group, and `import /etc/caddy/mason.d/*.caddy` appended to the Caddyfile once.
+No vhosts, no site or share folders.
 
-- creates the static web root (`2750`, mason-owned, group-readable for Caddy),
-- adds Caddy to the mason group so it can read the tree,
-- writes a static Caddy snippet to `/etc/caddy/mason.d/{target}.caddy`,
-- ensures the main Caddyfile imports `mason.d/*.caddy` exactly once,
-- `caddy validate`s, then reloads (or restarts when group membership changed).
+### Site provisioning (`mason provision`)
 
-It creates **no** users, keys, or share scaffolding (`objects/`, `s/`, `.mason/`),
-and the snippet carries **no** private-prefix 404 matcher.
+- creates the site's folder (`2750`, mason-owned, group-readable for Caddy),
+- writes `/etc/caddy/mason.d/<host>.caddy`, starting with `# managed by mason`,
+- `caddy validate`s, restoring the previous file on failure, then reloads (or restarts
+  when Caddy's group membership changed).
 
 **Apex domains vs subdomains** are auto-detected via the Public Suffix List (so
-multi-label TLDs like `.co.uk` classify correctly):
+multi-label TLDs like `.co.uk` classify correctly): a **subdomain** gets one
+`file_server` vhost; an **apex domain** is served from the bare apex with a permanent
+`www` → apex redirect. Every site vhost 404s dotfile paths except `/.well-known/*`.
+Caddy issues TLS for every name it serves, so an apex domain needs A/AAAA records for
+both the apex and `www`; `mason doctor` warns when the redirect is missing.
 
-- **Subdomain** (`blog.example.com`) → one plain `file_server` vhost.
-- **Apex domain** (`example.com`) → served from the bare apex, plus a permanent
-  `www.example.com` → `example.com` redirect block so both names resolve.
+A vhost without the `# managed by mason` line is treated as hand-edited: `provision`
+prints the diff and changes nothing unless `--force` (which backs the original up).
 
-Caddy issues TLS automatically for every name it serves, so an apex domain needs **A/AAAA
-records for both the apex and `www`** pointing at the VPS. `mason doctor` warns when an
-apex target's `www` redirect is absent from Caddy's config.
-
-**Prerequisite:** `mason remote-init` (or equivalent) has already run on the host, so
-the `mason` user, deploy key, and Caddyfile import discipline exist.
+Flags of note: `--spa` (or `spa: true` on the site) adds `try_files {path} /index.html`;
+`--apex` / `--subdomain` override detection; `--no-www` drops the redirect;
+`--no-reload` leaves validate/reload to you.
 
 ```sh
-# Review the script, then apply, then deploy the build:
-mason site-init -t home
-mason site-init -t home --apply --as-admin root
-mason deploy
-
-# Ad-hoc, before a .mason exists:
-mason site-init --host newsite.example.com --root /var/www/newsite --apply --as-admin root
-
-# Single-page app (history-mode routing):
-mason site-init -t home --spa
+mason provision                 # default site, asks first
+mason provision live --print    # review the script for another environment
 ```
-
-Flags of note: `--apex` / `--subdomain` force the domain handling when auto-detection
-isn't what you want; `--no-www` omits the apex www→apex redirect; `--host` / `--root`
-override the values derived from the target's `base_url` / `deploy.remote_path`; `--spa`
-adds a `try_files {path} /index.html` fallback; `--no-reload` prints the manual
-validate/reload steps instead of running them.
 
 ---
 
-## Config fields referenced by commands
+## Configuration
 
-A sketch of the per-target fields the commands above rely on (final schema lives
-in DESIGN_REFINEMENT.md):
-
-```yaml
-default: home
-
-targets:
-  home:
-    host: share.example.com
-    user: mason
-    root: /srv/share              # site root served by Caddy
-    base_url: https://share.example.com
-    key_path: ~/.ssh/id_ed25519
-    share:
-      default_path: inbox/        # implicit --as for un-organized shares
-    deploy:
-      build_dir: ./public         # local tree to deploy
-      remote_path: /srv/site      # where deploy lands (may differ from share root)
-```
-
-Config discovery: `.mason` in the current directory walking up to the project
-root, falling back to `~/.mason` for user-level defaults — so ad-hoc
-`mason share` works from anywhere.
+Config is two small files — `~/.mason` (server, share store) and a project `.mason`
+(site URL(s), build folder) — merged at load. **[CONFIG.md](./CONFIG.md)** is the
+authoritative reference: every key, derivation rules, validation, and v1 migration.
 
 ---
 
@@ -323,16 +294,15 @@ Share — maintenance
   mason sync
 
 Deploy
-  mason init
-  mason deploy [target]
-  mason status [target]
+  mason init [url]
+  mason deploy [site] [--delete] [-n]
+  mason status [site]
 
 Setup / admin
-  mason setup
-  mason doctor
-  mason remote-init
-  mason site-init
-  mason target ls|add|use|rm
+  mason setup <server> [--share <url>] [--print]
+  mason provision [site] [--print] [--force]
+  mason key ls|add|rm
+  mason doctor [site]
 ```
 
 ---

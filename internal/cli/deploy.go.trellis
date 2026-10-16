@@ -23,7 +23,7 @@ Feature: Deploy Commands
     - deploy MUST require confirmation before --delete removes remote files unless --yes
     - The build folder MUST resolve relative to the project file's directory, not the working directory
     - Before planning, deploy MUST verify the site's path exists and is writable, failing with 'mason provision' as the fix
-    - build: . MUST warn on stderr that the whole project folder is deployed
+    - build: . MUST warn on stderr only when the project looks like source (node_modules/ or package.json); a plain HTML project MUST deploy without noise
     - On a terminal, transfer progress MUST render as one in-place line; with -v as raw rsync lines; otherwise a single 'Sending …' line
     - Plain output MUST show the site, build folder, plan line, and summary or up-to-date message
 

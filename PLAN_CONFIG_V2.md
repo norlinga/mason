@@ -1,6 +1,6 @@
 # Plan: Config v2 — servers, sites, and one share store
 
-**Status:** In progress (2026-10-15).
+**Status:** Implemented on branch `config-v2` (2026-10-15); migration of `sites/` pending owner approval. Website (C9) not started.
 **Breaking:** Yes, deliberately. No compatibility shim; old-format files fail with a
 pointer to `CONFIG.md`. The 25 `sites/*/.mason` files and `~/.mason` are rewritten in
 one pass (see [Migration](#migration)).

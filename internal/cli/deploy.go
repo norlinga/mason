@@ -256,8 +256,10 @@ func defaultDeployRun(ctx context.Context, root rootOptions, req deployRequest) 
 	baseDir := filepath.Dir(cfg.ProjectFile)
 
 	if req.Plan == nil {
-		if strings.TrimSuffix(strings.TrimSpace(site.Build), "/") == "." && req.Warn != nil {
-			req.Warn("build: " + site.Build + " deploys the whole project folder — set build: to your generator's output folder (dotfiles are skipped either way)")
+		if req.Warn != nil {
+			if msg := wholeProjectWarning(baseDir, site.Build); msg != "" {
+				req.Warn(msg)
+			}
 		}
 		if err := checkProvisioned(ctx, site); err != nil {
 			return deploy.Result{}, err
@@ -276,6 +278,21 @@ func defaultDeployRun(ctx context.Context, root rootOptions, req deployRequest) 
 		return svc.Execute(ctx, opts, *req.Plan)
 	}
 	return svc.Run(ctx, opts)
+}
+
+// wholeProjectWarning flags build: . only when the folder looks like a source project
+// (node_modules/ or package.json), where deploying everything is almost certainly a
+// mistake; for a hand-written HTML site, build: . is exactly right.
+func wholeProjectWarning(baseDir, build string) string {
+	if strings.TrimSuffix(strings.TrimSpace(build), "/") != "." {
+		return ""
+	}
+	for _, marker := range []string{"node_modules", "package.json"} {
+		if _, err := os.Stat(filepath.Join(baseDir, marker)); err == nil {
+			return "build: . deploys the whole project, including " + marker + " — set build: to your generator's output folder"
+		}
+	}
+	return ""
 }
 
 // checkProvisioned fails early, with the fix, when the site's path is missing or not

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -274,5 +276,22 @@ func TestProgressLineRendersBar(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Sending ████████████░░░░░░░░░░░░  50%  18.10M  6.20MB/s") || !strings.HasSuffix(out, "\r\033[K") {
 		t.Fatalf("progress = %q", out)
+	}
+}
+
+func TestWholeProjectWarningOnlyForSourceProjects(t *testing.T) {
+	plain := t.TempDir()
+	if msg := wholeProjectWarning(plain, "."); msg != "" {
+		t.Fatalf("plain HTML project warned: %q", msg)
+	}
+	src := t.TempDir()
+	if err := os.Mkdir(filepath.Join(src, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if msg := wholeProjectWarning(src, "./"); !strings.Contains(msg, "node_modules") {
+		t.Fatalf("source project not warned: %q", msg)
+	}
+	if msg := wholeProjectWarning(src, "dist"); msg != "" {
+		t.Fatalf("real build folder warned: %q", msg)
 	}
 }

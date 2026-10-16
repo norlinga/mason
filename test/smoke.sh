@@ -2,20 +2,17 @@
 #
 # Mason end-to-end smoke test (manual; opt-in).
 #
-# Requires a configured, reachable target — run `mason setup` and `mason remote-init`
+# Requires a configured share store — run `mason setup <server> --share <url>`
 # first. It exercises the share MVP and lifecycle gates (G5/G7) against the real
 # server: upload, link-only re-share, disable/enable (path and slug), cp, and prune.
 #
 # Usage:
-#   ./test/smoke.sh                 # builds mason, uses the default target
+#   ./test/smoke.sh                 # builds mason, uses the share store in ~/.mason
 #   MASON=./mason ./test/smoke.sh   # use an existing binary
-#   TARGET=work ./test/smoke.sh     # override the target
 #
 set -euo pipefail
 
 MASON="${MASON:-}"
-TARGET_FLAG=()
-[ -n "${TARGET:-}" ] && TARGET_FLAG=(-t "$TARGET")
 
 cleanup_bin=""
 if [ -z "$MASON" ]; then
@@ -25,7 +22,7 @@ if [ -z "$MASON" ]; then
 	MASON="$cleanup_bin"
 fi
 
-mason() { "$MASON" "${TARGET_FLAG[@]}" "$@"; }
+mason() { "$MASON" "$@"; }
 code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
 slug_of() { mason info "$1" --json | grep -o '"slug": *"[^"]*"' | head -1 | sed -E 's/.*"slug": *"([^"]*)".*/\1/'; }
 pass() { echo "PASS: $1"; }
