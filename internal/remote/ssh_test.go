@@ -59,10 +59,10 @@ func TestSSHRunRemoteFailureDoesNotEchoCommand(t *testing.T) {
 
 func TestSSHConnectErrors(t *testing.T) {
 	tests := map[string]string{
-		"Host key verification failed.\r\n":                       "mason setup example.com",
+		"Host key verification failed.\r\n":                      "mason setup example.com",
 		"mason@example.com: Permission denied (publickey).\r\n":  "not authorized for mason@example.com",
 		"ssh: Could not resolve hostname example.com: Name or s": "cannot resolve host example.com",
-		"kex_exchange_identification: something odd\n":            "kex_exchange_identification: something odd",
+		"kex_exchange_identification: something odd\n":           "kex_exchange_identification: something odd",
 	}
 	for stderr, want := range tests {
 		runner := &fakeProcessRunner{result: ProcessResult{Stderr: stderr, ExitCode: 255}, err: &exec.ExitError{}}

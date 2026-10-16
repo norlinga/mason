@@ -248,7 +248,7 @@ Deploy preflight: if the site's path does not exist on the server, fail with
   rules, layering, examples for single/multi-site/override/share, and a v1 → v2
   migration section. `COMMANDS.md` and `README.md` link to it rather than restating it.
 - `COMMANDS.md`, `README.md`: updated command surface.
-- `docs.example.com`: config reference page generated from the same content; getting
+- The Mason website: config reference page generated from the same content; getting
   started rewritten around `mason setup` → `mason init` → `mason deploy`.
 - `DESIGN*.md`, `IMPLEMENTATION_PLAN.md`: historical; add a one-line pointer to this plan.
 
@@ -275,16 +275,16 @@ Deploy preflight: if the site's path does not exist on the server, fail with
 - **`rm` semantics — working as intended.** `rm` removes one endpoint so a guessable
   object-path URL can be dropped while a less guessable slug stays live. A whole-share
   removal may come later as a separate verb (`rm-all` / `rm-only`); out of scope here.
-- **`old.portfolio.example.com`** — an old backup with no resolving domain. Its project
-  file is migrated like any other; it keeps sharing the `portfolio.example.com` web root.
-- **`lapsed.example.com`** — domain lapsed; no action. Its vhost and project are migrated as-is.
-- **Server hardening done 2026-10-15** — leaked dotfiles removed, stray share stores in
-  `recipes.example.com` and `example.com` removed, dotfile 404 live on all 23 static vhosts
-  (F11's "today" step complete).
+- **A backup project sharing a live site's web root** — kept as-is (no resolving domain of
+  its own); its project file is migrated like any other. Deploying it overwrites the live site.
+- **A site whose domain lapsed** — no action; its vhost and project are migrated as-is.
+- **Server hardening done 2026-10-15** — leaked dotfiles removed, the two stray share stores
+  inside site web roots removed, dotfile 404 live on all 23 static vhosts (F11's "today" step
+  complete).
 
-- **`family.example.com`** — resolves to the same IP as `example.com`; its
-  project file uses the default server and keeps only `path: /var/www/family`.
+- **The one project with its own `host`** turned out to be another DNS name for the same
+  server; its project file uses the default server and keeps only its custom `path:`.
 - **Migration done 2026-10-15** — server snippets renamed by host and marked managed
-  (`portfolio.example.com` left hand-edited for its `header` line); `~/.mason` and all 25
+  (one vhost with a custom `header` line left hand-edited); `~/.mason` and all 25
   `sites/*/.mason` rewritten to v2 (v1 copy at `~/.mason.v1.bak`); `mason status` verified in
   every project.

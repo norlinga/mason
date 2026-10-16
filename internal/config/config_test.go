@@ -240,7 +240,7 @@ func TestParseServer(t *testing.T) {
 		"me@[2001:db8::1]:2222": {User: "me", Host: "2001:db8::1", Port: 2222},
 		"2001:db8::1":           {User: "mason", Host: "2001:db8::1"},
 		"[2001:db8::1]":         {User: "mason", Host: "2001:db8::1"},
-		"my-alias":               {User: "mason", Host: "my-alias"},
+		"my-alias":              {User: "mason", Host: "my-alias"},
 	}
 	for in, want := range tests {
 		got, err := ParseServer(in, "")

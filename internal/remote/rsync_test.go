@@ -224,7 +224,7 @@ func TestRsyncCopiesDirectoryLocally(t *testing.T) {
 func TestRsyncDestination(t *testing.T) {
 	tests := map[string]SSHOptions{
 		"mason@share.example.com:/srv/x": {User: "mason", Host: "share.example.com", Port: 2222},
-		"me@[2001:db8::1]:/srv/x":       {User: "me", Host: "2001:db8::1"},
+		"me@[2001:db8::1]:/srv/x":        {User: "me", Host: "2001:db8::1"},
 		"alias:/srv/x":                   {Host: "alias"},
 	}
 	for want, opts := range tests {
