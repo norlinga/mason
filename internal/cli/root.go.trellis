@@ -14,6 +14,7 @@ Feature: Mason Root Command
     - Persistent flags MUST be exactly --json, --yes, --quiet, --verbose, and --config; --dry-run belongs to deploy
     - --yes MUST only answer confirmations; it MUST NOT change which questions a command would otherwise ask
     - SilenceUsage and SilenceErrors MUST be true so cli controls error rendering
+    - version MUST report the build-stamped version, else the embedded VCS commit (short, -dirty when modified), else dev — never a constant that hides which build is running
 
   OutOfScope:
     - Service orchestration and remote I/O (owned by subcommand handlers and internal packages)

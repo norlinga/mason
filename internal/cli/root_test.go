@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -52,17 +53,39 @@ func TestRootHelpDropsV1Surface(t *testing.T) {
 }
 
 func TestVersionCommand(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
+	var stdout, stderr bytes.Buffer
 	cmd := NewRootCommand(&stdout, &stderr)
 	cmd.SetArgs([]string{"version"})
-
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute version: %v", err)
 	}
-
-	if got, want := stdout.String(), "mason dev\n"; got != want {
+	if got, want := stdout.String(), "mason "+currentVersion()+"\n"; got != want {
 		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
+
+func TestResolveVersion(t *testing.T) {
+	vcs := func(rev, modified string) *debug.BuildInfo {
+		return &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: rev}, {Key: "vcs.modified", Value: modified}}}
+	}
+	tests := []struct {
+		name    string
+		stamped string
+		info    *debug.BuildInfo
+		ok      bool
+		want    string
+	}{
+		{"stamped wins", "v0.2.0-3-gabc1234", vcs("45b5925aaaa", "false"), true, "v0.2.0-3-gabc1234"},
+		{"clean commit", "", vcs("45b5925aaaa", "false"), true, "dev-45b5925"},
+		{"dirty commit", "", vcs("45b5925aaaa", "true"), true, "dev-45b5925-dirty"},
+		{"go install tag", "", &debug.BuildInfo{Main: debug.Module{Version: "v0.2.0"}}, true, "v0.2.0"},
+		{"no vcs info", "", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, true, "dev"},
+		{"no build info", "", nil, false, "dev"},
+	}
+	for _, tt := range tests {
+		if got := resolveVersion(tt.stamped, tt.info, tt.ok); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

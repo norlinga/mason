@@ -4,11 +4,53 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
-var version = "dev"
+// version is stamped by `make build` (-X …/internal/cli.version=$(git describe)). When
+// unset, resolveVersion falls back to the VCS info Go embeds in every module build.
+var version = ""
+
+// resolveVersion returns the stamped version, else the embedded commit (with -dirty for
+// uncommitted changes), else "dev" (e.g. go run, or a build outside a git checkout).
+func resolveVersion(stamped string, info *debug.BuildInfo, ok bool) string {
+	if stamped != "" {
+		return stamped
+	}
+	if !ok || info == nil {
+		return "dev"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v // go install …@vX.Y.Z
+	}
+	var rev string
+	var dirty bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	return "dev-" + rev
+}
+
+func currentVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	return resolveVersion(version, info, ok)
+}
 
 type rootOptions struct {
 	json    bool
@@ -32,7 +74,7 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		Short:         "Publish files and static sites to a personal VPS",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       version,
+		Version:       currentVersion(),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -77,7 +119,7 @@ func newVersionCommand(stdout io.Writer) *cobra.Command {
 		Short: "Print the mason version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := fmt.Fprintf(stdout, "mason %s\n", version)
+			_, err := fmt.Fprintf(stdout, "mason %s\n", currentVersion())
 			return err
 		},
 	}
