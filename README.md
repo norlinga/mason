@@ -17,7 +17,7 @@ go build -o mason ./cmd/mason   # or: go install ./cmd/mason, or: make build
 ## Quick start
 
 ```sh
-mason setup example.com            # once per machine (bootstraps the server if needed)
+mason setup example.com             # once per machine (bootstraps the server if needed)
 
 cd ~/code/sites/blog.example.com
 mason init                          # writes .mason (site URL + build folder), offers to provision
@@ -40,8 +40,8 @@ That's it. Re-running any of these is safe.
 
 ```sh
 mason setup example.com
-mason setup example.com --share https://files.example.com   # also create your share store
-mason setup example.com --print                               # just show the scripts
+mason setup example.com --share https://files.example.com     # also create your share store
+mason setup example.com --print                                # just show the scripts
 ```
 
 **A second machine.** If the new machine has no admin access, setup prints a line to run

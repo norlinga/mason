@@ -20,8 +20,8 @@ share: https://files.example.com
 ```
 
 ```yaml
-# ~/code/sites/recipes.example.com/.mason
-site: https://recipes.example.com
+# ~/code/blog/.mason
+site: https://blog.example.com
 build: dist
 ```
 
@@ -64,7 +64,7 @@ server: example.com
 key: ~/.ssh/mason
 share:
   url: https://files.example.com
-  path: /var/www/share
+  path: /var/www/files
   inbox: inbox/
 ```
 
@@ -96,7 +96,7 @@ A project file may not contain `share`, because there is one share store per mac
 One site (the common case):
 
 ```yaml
-site: https://recipes.example.com
+site: https://blog.example.com
 build: dist
 ```
 
